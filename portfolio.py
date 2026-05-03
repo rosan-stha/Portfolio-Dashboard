@@ -195,6 +195,18 @@ def color_gainloss(val):
         return f"color: {color}; font-weight: 600"
     return ""
 
+# Fix index to start from 1
+portfolio_df.index = range(1, len(portfolio_df) + 1)
+
+# Remove .T from display ticker
+portfolio_df["Ticker"] = portfolio_df["Ticker"].str.replace(".T", "", regex=False)
+
+# Add TradingView link to Company name
+portfolio_df["Company"] = portfolio_df.apply(
+    lambda row: f'<a href="https://www.tradingview.com/symbols/TSE-{row["Ticker"]}" target="_blank" style="color:#2962ff; text-decoration:none;">{row["Company"]}</a>',
+    axis=1
+)
+
 styled_df = portfolio_df.style\
     .map(color_gainloss, subset=["Gain/Loss", "Gain/Loss (%)"])\
     .format({
@@ -211,7 +223,7 @@ styled_df = portfolio_df.style\
         "border-color":     "#2a2e39"
     })
 
-st.dataframe(styled_df, use_container_width=True, height=300)
+st.write(styled_df.to_html(escape=False), unsafe_allow_html=True)
 
 # ── CHARTS ROW ────────────────────────────────────────────────────────────────
 st.markdown("---")
