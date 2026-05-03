@@ -203,7 +203,7 @@ portfolio_df["Ticker"] = portfolio_df["Ticker"].str.replace(".T", "", regex=Fals
 
 # Add TradingView link to Company name
 portfolio_df["Company"] = portfolio_df.apply(
-    lambda row: f'<a href="https://www.tradingview.com/symbols/TSE-{row["Ticker"]}" target="_blank" style="color:#2962ff; text-decoration:none;">{row["Company"]}</a>',
+    lambda row: f'<a href="https://www.tradingview.com/chart/?symbol=TSE:{row["Ticker"]}" target="_blank" style="color:#2962ff; text-decoration:none;">{row["Company"]}</a>',
     axis=1
 )
 
