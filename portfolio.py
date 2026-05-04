@@ -349,15 +349,15 @@ with tab2:
     # Add TradingView links
     def tv_link(row):
         ticker = row["Ticker_raw"].replace(".T","")
-        suffix = "TSE-" if ".T" in row["Ticker_raw"] else ""
-        return f'<a href="https://www.tradingview.com/symbols/{suffix}{ticker}" target="_blank" style="color:#3b82f6;text-decoration:none;">📈 {row["Company"][:28]}</a>'
+        prefix = "TSE:" if ".T" in row["Ticker_raw"] else ""
+        return f'<a href="https://www.tradingview.com/chart/?symbol={prefix}{ticker}" target="_blank" style="color:#3b82f6;text-decoration:none;">📈 {row["Company"][:28]}</a>'
 
     display = filtered.copy()
     display["Company"] = display.apply(tv_link, axis=1)
 
     styled = display[["Company","Ticker","Shares","Avg Buy","Current Price","Market Value","Cost Basis","Gain (¥)","Gain (%)","Day (%)"]]\
         .style\
-        .applymap(lambda v: f"color: {GREEN}; font-weight:700" if isinstance(v,(int,float)) and v > 0
+        .map(lambda v: f"color: {GREEN}; font-weight:700" if isinstance(v,(int,float)) and v > 0
                   else (f"color: {RED}; font-weight:700" if isinstance(v,(int,float)) and v < 0 else ""),
                   subset=["Gain (¥)","Gain (%)","Day (%)"])\
         .format({
@@ -405,8 +405,8 @@ with tab3:
         sell_vals = [132268,0,0,0,0,11000,0,0,411362,0,0,0,0,0]
 
         fig_act = go.Figure()
-        fig_act.add_trace(go.Bar(name="Buy", x=months_demo, y=buy_vals, marker_color=GREEN, opacity=0.8, borderradius=3))
-        fig_act.add_trace(go.Bar(name="Sell", x=months_demo, y=sell_vals, marker_color=RED, opacity=0.7, borderradius=3))
+        fig_act.add_trace(go.Bar(name="Buy", x=months_demo, y=buy_vals, marker_color=GREEN, opacity=0.8))
+        fig_act.add_trace(go.Bar(name="Sell", x=months_demo, y=sell_vals, marker_color=RED, opacity=0.7))
         fig_act.update_layout(**PLOT_LAYOUT, height=280, barmode="group",
             legend=dict(bgcolor="#111827", font=dict(color="#64748b")),
             xaxis=dict(tickangle=45),
@@ -435,7 +435,7 @@ with tab3:
             return ""
 
         styled_tx = demo_tx.style\
-            .applymap(color_type, subset=["Type"])\
+            .map(color_type, subset=["Type"])\
             .set_properties(**{"background-color":"#111827","color":"#e2e8f0","border-color":"#1e2d40"})
         st.write(styled_tx.to_html(escape=False), unsafe_allow_html=True)
 
@@ -444,8 +444,6 @@ with tab3:
 # ══════════════════════════════════════════════════════════════════════════════
 with tab4:
     st.markdown('<p class="section-title">DIVIDEND & INCOME TRACKER</p>', unsafe_allow_html=True)
-
-    div_port = port[port["Gain (¥)"] >= 0]
 
     d1, d2, d3 = st.columns(3)
     d1.metric("Dividend Payers", f"{len(port[port['Gain (¥)'] >= 0])}")
@@ -494,7 +492,7 @@ with tab4:
     styled_div = div_data.style\
         .format({"Received (¥)": "¥{:,.0f}"})\
         .set_properties(**{"background-color":"#111827","color":"#e2e8f0","border-color":"#1e2d40"})\
-        .applymap(lambda v: f"color:{GOLD};font-weight:700", subset=["Received (¥)"])
+        .map(lambda v: f"color:{GOLD};font-weight:700", subset=["Received (¥)"])
     st.write(styled_div.to_html(escape=False), unsafe_allow_html=True)
 
     st.markdown("---")
