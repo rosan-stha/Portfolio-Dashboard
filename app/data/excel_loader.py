@@ -13,23 +13,23 @@ import streamlit as st
 
 # ── Column-name resolvers (internal_key → list of acceptable Excel headers) ──
 PS_MAP = {   # Portfolio Summary sheet
-    "company":       ["Company name", "Company Name", "Company", "銘柄名", "銘柄"],
+    "company":       ["Company / Fund Name", "Company name", "Company Name", "Company", "銘柄名", "銘柄"],
     "total_bought":  ["Total Bought (¥)", "Total Bought", "買付合計", "購入合計"],
     "total_sold":    ["Total Sold (¥)",   "Total Sold",   "売却合計"],
     "net_invested":  ["Net Invested (¥)", "Net Invested", "純投資額"],
-    "dividends":     ["Dividends (¥)",    "Dividends",    "配当金"],
+    "dividends":     ["Dividends / Dist. (¥)", "Dividends (¥)", "Dividends", "配当金"],
     "buy_trades":    ["Buy Trades",       "買付回数"],
     "last_purchase": ["Last Purchase",    "最終購入日"],
 }
 TH_MAP = {   # Transaction History sheet
     "date":    ["Date", "日付", "取引日"],
     "tx_type": ["Transaction Type", "Type", "取引種別"],
-    "company": ["Company/Fund", "Company", "Company Name", "銘柄名"],
+    "company": ["Company / Fund", "Company/Fund", "Company", "Company Name", "銘柄名"],
     "amount":  ["Amount (¥)", "Amount", "金額"],
     "type_en": ["Type (EN)", "Type EN", "Type_EN"],
 }
 DT_MAP = {   # Dividend Tracker sheet
-    "company":  ["Company/Fund", "Company", "Company Name", "銘柄名"],
+    "company":  ["Company / Fund", "Company/Fund", "Company", "Company Name", "銘柄名"],
     "received": ["Total Received (¥)", "Total Received", "配当合計"],
 }
 
@@ -50,15 +50,17 @@ def load_excel(file_bytes: bytes):
     """Read the uploaded Excel file and return (ps, th, dt) DataFrames."""
     xls = pd.ExcelFile(BytesIO(file_bytes))
 
-    # Portfolio Summary
-    ps = remap(pd.read_excel(xls, sheet_name="Portfolio Summary"), PS_MAP)
+    # Portfolio Summary — row 4 (0-indexed: 3) is the header; rows 1-3 are title/subtitle/blank
+    ps = remap(pd.read_excel(xls, sheet_name="Portfolio Summary", header=3), PS_MAP)
     for col in ["total_bought", "total_sold", "net_invested", "dividends", "buy_trades"]:
         if col in ps.columns:
             ps[col] = pd.to_numeric(ps[col], errors="coerce").fillna(0)
     ps = ps.dropna(subset=["company"]).reset_index(drop=True)
+    # drop section-label and total rows (numeric columns are 0 for them after coercion)
+    ps = ps[ps["company"].str.match(r"^(?!▶|TOTAL)", na=False)].reset_index(drop=True)
 
-    # Transaction History
-    th = remap(pd.read_excel(xls, sheet_name="Transaction History"), TH_MAP)
+    # Transaction History — row 2 (0-indexed: 1) is the header; row 1 is the title
+    th = remap(pd.read_excel(xls, sheet_name="Transaction History", header=1), TH_MAP)
     if "amount" in th.columns:
         th["amount"] = pd.to_numeric(th["amount"], errors="coerce").fillna(0)
     if "date" in th.columns:
@@ -67,8 +69,8 @@ def load_excel(file_bytes: bytes):
         th["type_en"] = th["tx_type"]
     th = th.dropna(subset=["date"]).reset_index(drop=True)
 
-    # Dividend Tracker
-    dt = remap(pd.read_excel(xls, sheet_name="Dividend Tracker"), DT_MAP)
+    # Dividend Tracker — row 2 (0-indexed: 1) is the header; row 1 is the title
+    dt = remap(pd.read_excel(xls, sheet_name="Dividend Tracker", header=1), DT_MAP)
     if "received" in dt.columns:
         dt["received"] = pd.to_numeric(dt["received"], errors="coerce").fillna(0)
     dt = (
