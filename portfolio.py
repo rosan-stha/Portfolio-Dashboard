@@ -1,276 +1,171 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# portfolio.py — Portfolio Intelligence Platform  v3.1
+# Streamlit entrypoint. All logic lives in the `app/` package.
+# Run with:  streamlit run portfolio.py
+# ─────────────────────────────────────────────────────────────────────────────
+
 import streamlit as st
-import pandas as pd
-import yfinance as yf
-import plotly.express as px
-import plotly.graph_objects as go
 
-# ── PAGE CONFIG ───────────────────────────────────────────────────────────────
+from app.config import DEFAULT_USD_JPY
+from app.data import tickers
+from app.data.excel_loader import load_excel, make_demo
+from app.ui import theme
+from app.ui.components import label, money_formatter, safe_sum
+from app.ui.tab_activity import render as render_activity
+from app.ui.tab_dividends import render as render_dividends
+from app.ui.tab_health import render as render_health
+from app.ui.tab_holdings import render as render_holdings
+from app.ui.tab_overview import render as render_overview
+from app.ui.tab_performance import render as render_performance
+from app.ui.tab_positions import render as render_positions
+from app.ui.tab_risk import render as render_risk
+from app.ui.tab_tickers import render as render_tickers
+
+
+# ─── Page config + theme ────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Portfolio Dashboard",
+    page_title="Portfolio Intelligence",
     page_icon="📈",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
+theme.inject()
 
-# ── TRADINGVIEW DARK THEME ────────────────────────────────────────────────────
-st.markdown("""
-<style>
-    /* Base */
-    html, body, [class*="css"] {
-        font-family: 'Trebuchet MS', sans-serif;
-        background-color: #131722;
-        color: #d1d4dc;
-    }
-    .stApp { background-color: #131722; }
 
-    /* Metric cards */
-    [data-testid="metric-container"] {
-        background-color: #1e2130;
-        border: 1px solid #2a2e39;
-        border-radius: 8px;
-        padding: 16px;
-    }
-    [data-testid="stMetricValue"] { color: #d1d4dc; font-size: 1.4rem; }
-    [data-testid="stMetricDelta"] { font-size: 0.9rem; }
-
-    /* Tables */
-    .stDataFrame { background-color: #1e2130; border-radius: 8px; }
-    thead tr th {
-        background-color: #2a2e39 !important;
-        color: #787b86 !important;
-        font-size: 0.75rem;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-    }
-    tbody tr:hover { background-color: #2a2e39 !important; }
-
-    /* Upload box */
-    [data-testid="stFileUploadDropzone"] {
-        background-color: #1e2130;
-        border: 1px dashed #2962ff;
-        border-radius: 8px;
-    }
-
-    /* Headers */
-    h1, h2, h3 { color: #d1d4dc; font-weight: 600; }
-    .section-title {
-        font-size: 0.75rem;
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-        color: #787b86;
-        margin-bottom: 8px;
-    }
-
-    /* Divider */
-    hr { border-color: #2a2e39; }
-
-    /* Sidebar */
-    [data-testid="stSidebar"] { background-color: #1e2130; }
-</style>
-""", unsafe_allow_html=True)
-
-# ── HEADER ────────────────────────────────────────────────────────────────────
-_, col_title = st.columns([1, 8])
-with col_title:
-    st.markdown("## 📊 Portfolio Dashboard")
-    st.markdown('<p class="section-title">PayPay Securities · Powered by Yahoo Finance</p>', unsafe_allow_html=True)
-
-st.markdown("---")
-
-# ── SIDEBAR: COLUMN MAPPER ────────────────────────────────────────────────────
+# ─── Sidebar ────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### ⚙️ CSV Column Mapping")
-    st.markdown('<p class="section-title">Match your PayPay CSV columns</p>', unsafe_allow_html=True)
-    st.info("After uploading your CSV, map each column to the correct field below.")
+    st.markdown("## 📈 Portfolio Intelligence")
+    st.markdown('<p class="lbl">PayPay Securities · Japan Equities</p>', unsafe_allow_html=True)
+    st.markdown("---")
 
-    col_ticker   = st.text_input("Ticker column name",       value="ticker")
-    col_shares   = st.text_input("Shares / Units column",    value="shares")
-    col_avgprice = st.text_input("Average Buy Price column", value="avg_price")
+    st.markdown("### 📂 Upload Excel File")
+    st.caption(
+        "Your Excel must have three sheets:\n"
+        "- **Portfolio Summary**\n"
+        "- **Transaction History**\n"
+        "- **Dividend Tracker**"
+    )
+    uploaded = st.file_uploader(
+        "Select .xlsx file",
+        type=["xlsx", "xls"],
+        label_visibility="collapsed",
+    )
 
     st.markdown("---")
-    st.markdown("### 💱 Currency")
-    currency = st.selectbox("Display currency", ["JPY (¥)", "USD ($)"])
-    symbol = "¥" if "JPY" in currency else "$"
+    st.markdown("### 💱 Display Currency")
+    currency = st.radio("Currency", ["JPY (¥)", "USD ($)"], index=0, label_visibility="collapsed")
+    sym = "¥" if "JPY" in currency else "$"
+    usd_rate = DEFAULT_USD_JPY
+    if sym == "$":
+        usd_rate = st.number_input(
+            "JPY → USD exchange rate",
+            value=DEFAULT_USD_JPY, min_value=1.0, step=0.5, format="%.1f",
+        )
 
     st.markdown("---")
-    st.markdown("### ℹ️ About")
-    st.markdown("Upload your PayPay Securities CSV export. This app fetches live prices from Yahoo Finance and displays your portfolio in English.")
+    st.caption(
+        "Data: Excel upload + Yahoo Finance live prices.\n"
+        "Not financial advice."
+    )
 
-# ── FILE UPLOAD ───────────────────────────────────────────────────────────────
-uploaded_file = st.file_uploader(
-    "Upload your PayPay Securities CSV export",
-    type=["csv"],
-    help="Export from PayPay Securities → My Page → Portfolio → Download CSV"
-)
+money = money_formatter(sym, usd_rate)
 
-# ── DEMO DATA (if no file uploaded) ──────────────────────────────────────────
-def load_demo_data():
-    return pd.DataFrame({
-        "ticker":    ["7203.T", "9984.T", "6758.T", "4755.T", "9433.T"],
-        "shares":    [10, 5, 8, 20, 15],
-        "avg_price": [2100, 7800, 12500, 1800, 4200]
-    })
 
-# ── FETCH STOCK DATA ──────────────────────────────────────────────────────────
-@st.cache_data(ttl=300)
-def fetch_stock_info(ticker):
-    try:
-        stock = yf.Ticker(ticker)
-        info  = stock.info
-        hist  = stock.history(period="5d")
-        price = hist["Close"].iloc[-1] if not hist.empty else (info.get("currentPrice") or 0)
-        name  = info.get("longName") or info.get("shortName") or ticker
-        return {
-            "name":          name,
-            "current_price": round(price, 2),
-            "currency":      info.get("currency", "JPY")
-        }
-    except Exception:
-        return {"name": ticker, "current_price": 0, "currency": "JPY"}
-
-# ── MAIN APP LOGIC ────────────────────────────────────────────────────────────
-if uploaded_file is not None:
-    raw_df = pd.read_csv(uploaded_file, encoding="utf-8-sig")
-    st.markdown("#### 👀 Raw CSV Preview")
-    st.dataframe(raw_df.head(5), use_container_width=True)
-
-    try:
-        df = raw_df.rename(columns={
-            col_ticker:   "ticker",
-            col_shares:   "shares",
-            col_avgprice: "avg_price"
-        })[["ticker", "shares", "avg_price"]]
-    except KeyError as e:
-        st.error(f"Column not found: {e}. Check your column mapping in the sidebar.")
-        st.stop()
+# ─── Load data ──────────────────────────────────────────────────────────────
+if uploaded is None:
+    ps, th, dt = make_demo()
+    st.info(
+        "📂 **Demo mode** — upload your Excel file in the sidebar to see real data.",
+        icon="ℹ️",
+    )
 else:
-    st.info("📂 No file uploaded — showing demo data. Upload your CSV to see real portfolio.")
-    df = load_demo_data()
+    try:
+        with st.spinner("Reading your Excel file…"):
+            ps, th, dt = load_excel(uploaded.read())
+        st.success(
+            f"✅ Loaded **{len(ps):,} positions** from your portfolio file.",
+            icon="✅",
+        )
+    except Exception as e:
+        st.error(f"❌ Could not read file: {e}")
+        st.stop()
 
-# ── FETCH LIVE DATA ───────────────────────────────────────────────────────────
-with st.spinner("🔄 Fetching live prices from Yahoo Finance..."):
-    results = []
-    for _, row in df.iterrows():
-        info = fetch_stock_info(str(row["ticker"]).strip())
-        results.append({
-            "Company":        info["name"],
-            "Ticker":         str(row["ticker"]).upper(),
-            "Shares":         row["shares"],
-            "Avg Buy Price":  row["avg_price"],
-            "Current Price":  info["current_price"],
-            "Market Value":   round(row["shares"] * info["current_price"], 0),
-            "Cost Basis":     round(row["shares"] * row["avg_price"], 0),
-            "Gain/Loss":      round((info["current_price"] - row["avg_price"]) * row["shares"], 0),
-            "Gain/Loss (%)":  round(((info["current_price"] - row["avg_price"]) / row["avg_price"]) * 100, 2) if row["avg_price"] > 0 else 0
-        })
+# Initialize ticker store (loads from disk on first call)
+tickers.init()
 
-portfolio_df = pd.DataFrame(results)
 
-# Fix index to start from 1
-portfolio_df.index = range(1, len(portfolio_df) + 1)
+# ─── Header ─────────────────────────────────────────────────────────────────
+st.markdown("## 📊 Portfolio Dashboard")
+label("PayPay Securities · Japan Equities")
+st.markdown("---")
 
-# Remove .T from display ticker
-portfolio_df["Ticker"] = portfolio_df["Ticker"].str.replace(".T", "", regex=False)
 
-# Add TradingView link to Company name
-portfolio_df["Company"] = portfolio_df.apply(
-    lambda row: f'<a href="https://www.tradingview.com/chart/?symbol=TSE:{row["Ticker"]}" target="_blank" style="color:#2962ff; text-decoration:none;">{row["Company"]}</a>',
-    axis=1
+# ─── Top KPI row (cost-basis view, always available) ────────────────────────
+label("Portfolio At a Glance")
+total_net    = safe_sum(ps, "net_invested")
+total_bought = safe_sum(ps, "total_bought")
+total_divs   = safe_sum(ps, "dividends")
+total_trades = int(safe_sum(ps, "buy_trades"))
+num_pos      = len(ps)
+
+c1, c2, c3, c4, c5 = st.columns(5)
+c1.metric("Total Net Invested",  money(total_net))
+c2.metric("Total Gross Bought",  money(total_bought))
+c3.metric("Total Dividends",     money(total_divs))
+c4.metric("Positions",           f"{num_pos:,}")
+c5.metric("Buy Trades",          f"{total_trades:,}")
+
+st.markdown("---")
+
+
+# ─── Tabs ───────────────────────────────────────────────────────────────────
+tab_ov, tab_health, tab_pos, tab_risk, tab_perf, tab_hold, tab_act, tab_div, tab_tick = st.tabs([
+    "📊  Overview",
+    "🎯  Health",
+    "💹  Positions",
+    "⚠️  Risk",
+    "📈  Performance",
+    "📋  Holdings",
+    "📜  Activity",
+    "💰  Dividends",
+    "🏷️  Tickers",
+])
+
+with tab_ov:
+    render_overview(ps, th)
+
+with tab_health:
+    render_health(ps, th, money)
+
+with tab_pos:
+    render_positions(ps, th, money)
+
+with tab_risk:
+    render_risk(ps, th, money)
+
+with tab_perf:
+    render_performance(ps, th, money)
+
+with tab_hold:
+    render_holdings(ps, money)
+
+with tab_act:
+    render_activity(th, money)
+
+with tab_div:
+    render_dividends(dt, money)
+
+with tab_tick:
+    render_tickers(ps)
+
+
+# ─── Footer ─────────────────────────────────────────────────────────────────
+from app.config import MUTED
+st.markdown("---")
+st.markdown(
+    f'<p style="color:{MUTED};font-size:0.75rem;text-align:center;">'
+    "Data: Excel upload + Yahoo Finance &nbsp;·&nbsp; Not financial advice "
+    "&nbsp;·&nbsp; Portfolio Intelligence v3.1"
+    "</p>",
+    unsafe_allow_html=True,
 )
-
-# ── SUMMARY METRICS ───────────────────────────────────────────────────────────
-st.markdown("---")
-st.markdown('<p class="section-title">Portfolio Summary</p>', unsafe_allow_html=True)
-
-total_value    = portfolio_df["Market Value"].sum()
-total_cost     = portfolio_df["Cost Basis"].sum()
-total_gain     = portfolio_df["Gain/Loss"].sum()
-total_gain_pct = round(((total_value - total_cost) / total_cost) * 100, 2) if total_cost > 0 else 0
-num_positions  = len(portfolio_df)
-winners        = len(portfolio_df[portfolio_df["Gain/Loss (%)"] > 0])
-losers         = len(portfolio_df[portfolio_df["Gain/Loss (%)"] < 0])
-
-m1, m2, m3, m4, m5 = st.columns(5)
-m1.metric("Total Portfolio Value",  f"{symbol}{total_value:,.0f}")
-m2.metric("Total Cost Basis",       f"{symbol}{total_cost:,.0f}")
-m3.metric("Total Gain / Loss",      f"{symbol}{total_gain:,.0f}", delta=f"{total_gain_pct}%")
-m4.metric("Positions",              f"{num_positions}")
-m5.metric("Winners / Losers",       f"{winners}W · {losers}L")
-
-# ── HOLDINGS TABLE ────────────────────────────────────────────────────────────
-st.markdown("---")
-st.markdown('<p class="section-title">Holdings</p>', unsafe_allow_html=True)
-
-def color_gainloss(val):
-    if isinstance(val, (int, float)):
-        color = "#089981" if val > 0 else "#f23645" if val < 0 else "#d1d4dc"
-        return f"color: {color}; font-weight: 600"
-    return ""
-
-styled_df = portfolio_df.style\
-    .map(color_gainloss, subset=["Gain/Loss", "Gain/Loss (%)"])\
-    .format({
-        "Avg Buy Price":  f"{symbol}{{:,.2f}}",
-        "Current Price":  f"{symbol}{{:,.2f}}",
-        "Market Value":   f"{symbol}{{:,.0f}}",
-        "Cost Basis":     f"{symbol}{{:,.0f}}",
-        "Gain/Loss":      f"{symbol}{{:,.0f}}",
-        "Gain/Loss (%)":  "{:.2f}%"
-    })\
-    .set_properties(**{
-        "background-color": "#1e2130",
-        "color":            "#d1d4dc",
-        "border-color":     "#2a2e39"
-    })
-
-st.write(styled_df.to_html(escape=False), unsafe_allow_html=True)
-
-# ── CHARTS ROW ────────────────────────────────────────────────────────────────
-st.markdown("---")
-chart1, chart2 = st.columns(2)
-
-# Pie chart — Portfolio Allocation
-with chart1:
-    st.markdown('<p class="section-title">Portfolio Allocation</p>', unsafe_allow_html=True)
-    fig_pie = px.pie(
-        portfolio_df,
-        values="Market Value",
-        names="Company",
-        hole=0.5,
-        color_discrete_sequence=px.colors.qualitative.Safe
-    )
-    fig_pie.update_layout(
-        paper_bgcolor="#1e2130",
-        plot_bgcolor="#1e2130",
-        font_color="#d1d4dc",
-        legend=dict(bgcolor="#1e2130", font=dict(color="#d1d4dc")),
-        margin=dict(t=20, b=20, l=20, r=20)
-    )
-    fig_pie.update_traces(textfont_color="#d1d4dc")
-    st.plotly_chart(fig_pie, use_container_width=True)
-
-# Bar chart — Gain/Loss per stock
-with chart2:
-    st.markdown('<p class="section-title">Gain / Loss by Position</p>', unsafe_allow_html=True)
-    bar_colors = ["#089981" if v >= 0 else "#f23645" for v in portfolio_df["Gain/Loss (%)"]]
-    fig_bar = go.Figure(go.Bar(
-        x=portfolio_df["Ticker"],
-        y=portfolio_df["Gain/Loss (%)"],
-        marker_color=bar_colors,
-        text=[f"{v:.2f}%" for v in portfolio_df["Gain/Loss (%)"]],
-        textposition="outside",
-        textfont=dict(color="#d1d4dc")
-    ))
-    fig_bar.update_layout(
-        paper_bgcolor="#1e2130",
-        plot_bgcolor="#1e2130",
-        font_color="#d1d4dc",
-        xaxis=dict(gridcolor="#2a2e39", color="#787b86"),
-        yaxis=dict(gridcolor="#2a2e39", color="#787b86", ticksuffix="%"),
-        margin=dict(t=20, b=20, l=20, r=20),
-        showlegend=False
-    )
-    st.plotly_chart(fig_bar, use_container_width=True)
-
-# ── FOOTER ────────────────────────────────────────────────────────────────────
-st.markdown("---")
-st.markdown('<p style="color:#787b86; font-size:0.75rem; text-align:center;">Data sourced from Yahoo Finance · Prices delayed · Not financial advice</p>', unsafe_allow_html=True)
