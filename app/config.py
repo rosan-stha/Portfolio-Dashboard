@@ -6,17 +6,20 @@ ROOT_DIR    = Path(__file__).resolve().parent.parent
 FILES_DIR   = ROOT_DIR / "Files"
 TICKERS_JSON = FILES_DIR / "tickers.json"
 
-# ── TradingView dark theme palette ──────────────────────────────────────────
-BG     = "#131722"   # page background
-CARD   = "#1e2130"   # metric cards / table-row hover
-BORDER = "#2a2e39"   # subtle borders
-TEXT   = "#d1d4dc"   # primary text
-MUTED  = "#787b86"   # secondary / labels
-GREEN  = "#089981"   # profit / buy
-RED    = "#f23645"   # loss / sell
-GOLD   = "#ffc94d"   # dividends / special
-BLUE   = "#2962ff"   # links / accent
-NOGRID = "rgba(0,0,0,0)"
+# ── Portfolio Intelligence — warm cream / financial-pro palette ──────────────
+BG      = "#f5f3ec"   # warm cream page background
+BG2     = "#ebe7da"   # slightly darker bg / hover
+CARD    = "#ffffff"   # white surface / card background
+TEXT    = "#0c0c0c"   # primary text
+TEXT2   = "#3d3d36"   # secondary text
+MUTED   = "#767168"   # muted / labels
+BORDER  = "#e2ddcd"   # warm border
+ACCENT  = "#c8102e"   # Japanese flag red — primary accent
+GREEN   = "#c8102e"   # gain / buy  (Japan convention: red = up)
+RED     = "#1f6e3a"   # loss / sell (Japan convention: green = down)
+GOLD    = "#c87f10"   # dividends / warning / amber
+BLUE    = "#5b6470"   # neutral chart / benchmark color
+NOGRID  = "rgba(0,0,0,0)"
 
 # ── Market-data cache TTLs (seconds) ────────────────────────────────────────
 QUOTE_TTL   = 15 * 60         # live quote — 15 minutes

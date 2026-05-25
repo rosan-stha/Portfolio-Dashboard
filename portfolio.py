@@ -25,7 +25,7 @@ from app.ui.tab_tickers import render as render_tickers
 # ─── Page config + theme ────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Portfolio Intelligence",
-    page_icon="📈",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -34,9 +34,15 @@ theme.inject()
 
 # ─── Sidebar ────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## 📈 Portfolio Intelligence")
-    st.markdown('<p class="lbl">PayPay Securities · Japan Equities</p>', unsafe_allow_html=True)
-    st.markdown("---")
+    st.markdown("""
+<div class="brand-bar">
+  <div class="brand-logo">P</div>
+  <div>
+    <div class="brand-title">Portfolio Intelligence</div>
+    <div class="brand-sub">PayPay Securities · 日本株</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
     st.markdown("### 📂 Upload Excel File")
     st.caption(
@@ -95,9 +101,17 @@ tickers.init()
 
 
 # ─── Header ─────────────────────────────────────────────────────────────────
-st.markdown("## 📊 Portfolio Dashboard")
-label("PayPay Securities · Japan Equities")
-st.markdown("---")
+st.markdown("""
+<div class="brand-bar">
+  <div class="brand-logo">P</div>
+  <div>
+    <div class="brand-title">Portfolio Intelligence</div>
+    <div class="brand-sub">PayPay Securities · 日本株</div>
+  </div>
+  <div class="brand-divider"></div>
+  <p class="lbl" style="margin:0">Portfolio Dashboard</p>
+</div>
+""", unsafe_allow_html=True)
 
 
 # ─── Top KPI row (cost-basis view, always available) ────────────────────────

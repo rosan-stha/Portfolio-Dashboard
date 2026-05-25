@@ -4,7 +4,7 @@ import urllib.parse
 import pandas as pd
 import streamlit as st
 
-from app.config import CARD, MUTED, TEXT
+from app.config import BG2, BORDER, CARD, MUTED, TEXT
 
 
 def label(text: str) -> None:
@@ -42,18 +42,15 @@ def safe_sum(df: pd.DataFrame, col: str) -> float:
 
 
 def chart_base(**extra) -> dict:
-    """Shared Plotly layout — dark theme, no gridlines.
-
-    Uses .update() so any key passed via `extra` cleanly overrides the default
-    rather than colliding when spread into update_layout() alongside the same
-    kwarg.
-    """
+    """Shared Plotly layout — light theme, warm borders, no gridlines."""
     base = dict(
         paper_bgcolor=CARD,
-        plot_bgcolor=CARD,
-        font=dict(color=TEXT, size=11),
+        plot_bgcolor=BG2,
+        font=dict(color=TEXT, size=11, family="IBM Plex Sans, IBM Plex Sans JP, system-ui"),
         margin=dict(t=30, b=20, l=20, r=20),
         showlegend=False,
+        xaxis=dict(gridcolor=BORDER, zerolinecolor=BORDER, linecolor=BORDER, tickfont=dict(color=MUTED)),
+        yaxis=dict(gridcolor=BORDER, zerolinecolor=BORDER, linecolor=BORDER, tickfont=dict(color=MUTED)),
     )
     base.update(extra)
     return base
