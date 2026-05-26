@@ -1,10 +1,10 @@
-"""Atlas Terminal — global CSS injection via JS parent-document injection.
+"""Atlas Terminal — global CSS injection via st.html().
 
-Uses streamlit.components.v1.html() to append <style> and <link> elements
-directly to window.parent.document.head, bypassing Streamlit's HTML sanitizer
-and Markdown processor (which broke st.markdown injection on Streamlit Cloud).
+st.html() (Streamlit >= 1.31) renders HTML directly into the page without
+Markdown processing, so CSS selectors like *, *::before are never mis-parsed
+as emphasis markers. No iframe, no JS parent-document tricks needed.
 """
-import streamlit.components.v1 as components
+import streamlit as st
 
 _FONTS_URL = (
     "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800"
@@ -636,35 +636,9 @@ footer { visibility: hidden !important; }
 
 
 def inject() -> None:
-    css = _CSS.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
-    components.html(
-        f"""<script>
-(function(){{
-  var d = window.parent.document;
-  if (!d.getElementById('atlas-fonts')) {{
-    var lp = d.createElement('link');
-    lp.rel = 'preconnect';
-    lp.href = 'https://fonts.googleapis.com';
-    d.head.appendChild(lp);
-    var lp2 = d.createElement('link');
-    lp2.rel = 'preconnect';
-    lp2.href = 'https://fonts.gstatic.com';
-    lp2.crossOrigin = 'anonymous';
-    d.head.appendChild(lp2);
-    var l = d.createElement('link');
-    l.id = 'atlas-fonts';
-    l.rel = 'stylesheet';
-    l.href = '{_FONTS_URL}';
-    d.head.appendChild(l);
-  }}
-  if (!d.getElementById('atlas-styles')) {{
-    var s = d.createElement('style');
-    s.id = 'atlas-styles';
-    s.textContent = `{css}`;
-    d.head.appendChild(s);
-  }}
-}})();
-</script>""",
-        height=0,
-        scrolling=False,
+    st.html(
+        f'<link rel="preconnect" href="https://fonts.googleapis.com">'
+        f'<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+        f'<link href="{_FONTS_URL}" rel="stylesheet">'
+        f"<style>{_CSS}</style>"
     )
