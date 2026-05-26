@@ -1,17 +1,18 @@
-"""Atlas Terminal — global CSS injection.
-Matches the offline reference design exactly: dark navy, cyan accent,
-Space Grotesk / Inter / JetBrains Mono, glassmorphism cards.
+"""Atlas Terminal — global CSS injection via JS parent-document injection.
+
+Uses streamlit.components.v1.html() to append <style> and <link> elements
+directly to window.parent.document.head, bypassing Streamlit's HTML sanitizer
+and Markdown processor (which broke st.markdown injection on Streamlit Cloud).
 """
-import streamlit as st
+import streamlit.components.v1 as components
 
+_FONTS_URL = (
+    "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800"
+    "&family=Space+Grotesk:wght@400;500;600;700"
+    "&family=JetBrains+Mono:wght@400;500;600&display=swap"
+)
 
-def inject() -> None:
-    st.markdown("""
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-
+_CSS = """
 /* ══ CSS VARIABLES ═══════════════════════════════════════════════════════════ */
 :root {
   --bg:           #050816;
@@ -631,6 +632,39 @@ h1, h2, h3 {
 #MainMenu, [data-testid="stToolbar"], [data-testid="manage-app-button"] { visibility: hidden !important; }
 footer { visibility: hidden !important; }
 [data-testid="stHeader"] { background: transparent !important; }
+"""
 
-</style>
-""", unsafe_allow_html=True)
+
+def inject() -> None:
+    css = _CSS.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
+    components.html(
+        f"""<script>
+(function(){{
+  var d = window.parent.document;
+  if (!d.getElementById('atlas-fonts')) {{
+    var lp = d.createElement('link');
+    lp.rel = 'preconnect';
+    lp.href = 'https://fonts.googleapis.com';
+    d.head.appendChild(lp);
+    var lp2 = d.createElement('link');
+    lp2.rel = 'preconnect';
+    lp2.href = 'https://fonts.gstatic.com';
+    lp2.crossOrigin = 'anonymous';
+    d.head.appendChild(lp2);
+    var l = d.createElement('link');
+    l.id = 'atlas-fonts';
+    l.rel = 'stylesheet';
+    l.href = '{_FONTS_URL}';
+    d.head.appendChild(l);
+  }}
+  if (!d.getElementById('atlas-styles')) {{
+    var s = d.createElement('style');
+    s.id = 'atlas-styles';
+    s.textContent = `{css}`;
+    d.head.appendChild(s);
+  }}
+}})();
+</script>""",
+        height=0,
+        scrolling=False,
+    )
