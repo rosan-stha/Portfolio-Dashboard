@@ -82,11 +82,11 @@ def render(dt: pd.DataFrame, money: Callable[[float], str]) -> None:
         textfont=dict(color=TEXT, size=10),
         hovertemplate="<b>%{y}</b><br>Received: ¥%{x:,.0f}<extra></extra>",
     ))
-    fig.update_layout(
-        **chart_base(height=max(280, len(top20) * 32)),
+    fig.update_layout(**chart_base(
+        height=max(280, len(top20) * 32),
         xaxis=dict(color=MUTED, gridcolor=NOGRID, showgrid=False, tickprefix="¥"),
         yaxis=dict(color=MUTED, gridcolor=NOGRID, showgrid=False),
-    )
+    ))
     st.plotly_chart(fig, use_container_width=True)
 
     csv_div = dt.rename(columns={"company": "Company", "received": "Total Received"}).to_csv(index=False)

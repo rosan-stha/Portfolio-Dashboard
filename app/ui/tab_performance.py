@@ -57,14 +57,12 @@ def _equity_curve(
             hovertemplate=f"<b>{name}</b><br>%{{x|%Y-%m-%d}}: %{{y:.1f}}<extra></extra>",
         ))
 
-    fig.update_layout(
-        **chart_base(height=400, showlegend=True),
-        legend=dict(bgcolor=CARD, font=dict(color=TEXT, size=10),
-                    orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    fig.update_layout(**chart_base(
+        height=400, showlegend=True, hovermode="x unified",
         xaxis=dict(color=MUTED, gridcolor=BORDER, showgrid=True),
         yaxis=dict(color=MUTED, gridcolor=BORDER, showgrid=True, title="Indexed to 100"),
-        hovermode="x unified",
-    )
+    ), legend=dict(bgcolor=CARD, font=dict(color=TEXT, size=10),
+                   orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     return fig
 
 
@@ -77,11 +75,11 @@ def _drawdown_curve(portfolio: pd.Series) -> go.Figure:
         fillcolor="rgba(242,54,69,0.25)",
         hovertemplate="%{x|%Y-%m-%d}: %{y:.2f}%<extra></extra>",
     ))
-    fig.update_layout(
-        **chart_base(height=240),
+    fig.update_layout(**chart_base(
+        height=240,
         xaxis=dict(color=MUTED, gridcolor=BORDER, showgrid=True),
         yaxis=dict(color=MUTED, gridcolor=BORDER, showgrid=True, ticksuffix="%", title="Drawdown"),
-    )
+    ))
     return fig
 
 
@@ -106,11 +104,11 @@ def _returns_heatmap(rs_df: pd.DataFrame) -> go.Figure:
                       outlinewidth=0, thickness=12, ticksuffix="%"),
     ))
     h = max(360, len(labels) * 28)
-    fig.update_layout(
-        **chart_base(height=h),
+    fig.update_layout(**chart_base(
+        height=h,
         xaxis=dict(color=MUTED, side="bottom"),
         yaxis=dict(color=MUTED, autorange="reversed"),
-    )
+    ))
     return fig
 
 

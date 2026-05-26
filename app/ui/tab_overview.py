@@ -54,11 +54,11 @@ def render(ps: pd.DataFrame, th: pd.DataFrame) -> None:
             opacity=0.88,
             hovertemplate="<b>%{y}</b><br>Net Invested: ¥%{x:,.0f}<extra></extra>",
         ))
-        fig.update_layout(
-            **chart_base(height=380),
+        fig.update_layout(**chart_base(
+            height=380,
             xaxis=dict(color=MUTED, gridcolor=NOGRID, showgrid=False, tickprefix="¥"),
             yaxis=dict(color=MUTED, gridcolor=NOGRID, showgrid=False),
-        )
+        ))
         st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("---")
@@ -110,13 +110,11 @@ def render(ps: pd.DataFrame, th: pd.DataFrame) -> None:
                 marker_color=RED,
                 hovertemplate="<b>%{x}</b><br>Sell: ¥%{y:,.0f}<extra></extra>",
             ))
-            fig.update_layout(
-                **chart_base(height=360, showlegend=True),
-                barmode="group",
-                legend=dict(bgcolor=CARD, font=dict(color=TEXT)),
+            fig.update_layout(**chart_base(
+                height=360, showlegend=True, barmode="group",
                 xaxis=dict(color=MUTED, gridcolor=NOGRID, showgrid=False),
                 yaxis=dict(color=MUTED, gridcolor=NOGRID, showgrid=False, tickprefix="¥"),
-            )
+            ), legend=dict(bgcolor=CARD, font=dict(color=TEXT)))
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("Transaction history not available for monthly chart.")

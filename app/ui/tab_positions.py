@@ -171,11 +171,11 @@ def render(ps: pd.DataFrame, th: pd.DataFrame, money: Callable[[float], str]) ->
                 marker_color=GREEN, opacity=0.88,
                 hovertemplate="<b>%{y}</b><br>Market Value: ¥%{x:,.0f}<extra></extra>",
             ))
-            fig.update_layout(
-                **chart_base(height=380),
+            fig.update_layout(**chart_base(
+                height=380,
                 xaxis=dict(color=MUTED, gridcolor=NOGRID, showgrid=False, tickprefix="¥"),
                 yaxis=dict(color=MUTED, gridcolor=NOGRID, showgrid=False),
-            )
+            ))
             st.plotly_chart(fig, use_container_width=True)
 
     # ── CSV export ───────────────────────────────────────────────────────────

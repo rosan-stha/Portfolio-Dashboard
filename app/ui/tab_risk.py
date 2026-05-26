@@ -164,11 +164,11 @@ def render(ps: pd.DataFrame, th: pd.DataFrame, money: Callable[[float], str]) ->
         ),
     ))
     h = max(420, len(labels) * 28)
-    fig.update_layout(
-        **chart_base(height=h),
+    fig.update_layout(**chart_base(
+        height=h,
         xaxis=dict(color=MUTED, side="bottom", tickangle=-40),
         yaxis=dict(color=MUTED, autorange="reversed"),
-    )
+    ))
     st.plotly_chart(fig, use_container_width=True)
 
     # Summary stats

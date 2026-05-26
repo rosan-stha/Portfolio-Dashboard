@@ -77,27 +77,27 @@ def safe_sum(df: pd.DataFrame, col: str) -> float:
 
 # ── Chart base ────────────────────────────────────────────────────────────────
 
+_AXIS_DARK = dict(
+    gridcolor="rgba(148,163,184,0.06)",
+    zerolinecolor="rgba(148,163,184,0.10)",
+    linecolor="rgba(148,163,184,0.08)",
+    tickfont=dict(color="#64748B", size=10, family="JetBrains Mono, monospace"),
+)
+
+
 def chart_base(**extra) -> dict:
-    """Dark terminal Plotly layout."""
+    """Dark terminal Plotly layout. Pass xaxis/yaxis via extra to merge with dark defaults."""
     base = dict(
         paper_bgcolor="rgba(11,18,32,0.0)",
         plot_bgcolor="rgba(11,18,32,0.0)",
         font=dict(color="#CBD5E1", size=11, family="JetBrains Mono, Inter, system-ui"),
         margin=dict(t=30, b=30, l=20, r=20),
         showlegend=False,
-        xaxis=dict(
-            gridcolor="rgba(148,163,184,0.06)",
-            zerolinecolor="rgba(148,163,184,0.10)",
-            linecolor="rgba(148,163,184,0.08)",
-            tickfont=dict(color="#64748B", size=10, family="JetBrains Mono, monospace"),
-        ),
-        yaxis=dict(
-            gridcolor="rgba(148,163,184,0.06)",
-            zerolinecolor="rgba(148,163,184,0.10)",
-            linecolor="rgba(148,163,184,0.08)",
-            tickfont=dict(color="#64748B", size=10, family="JetBrains Mono, monospace"),
-        ),
     )
+    # Merge xaxis/yaxis with dark defaults when provided
+    for ax in ("xaxis", "yaxis"):
+        if ax in extra:
+            base[ax] = {**_AXIS_DARK, **extra.pop(ax)}
     base.update(extra)
     return base
 
