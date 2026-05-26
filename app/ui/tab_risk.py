@@ -1,4 +1,4 @@
-"""Risk Exposure tab — sector/country/currency/cap breakdowns + correlation heatmap."""
+"""Risk Exposure tab — sector/country/currency/cap breakdowns + correlation heatmap + alerts."""
 from typing import Callable
 
 import numpy as np
@@ -7,11 +7,12 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from app.alerts.thresholds import check_all_alerts
 from app.analytics import correlation as corr_mod
 from app.analytics import positions as pos
-from app.config import BLUE, BORDER, CARD, GOLD, GREEN, MUTED, NOGRID, RED, TEXT
+from app.config import ALERT_THRESHOLDS, BLUE, BORDER, CARD, GOLD, GREEN, MUTED, NOGRID, RED, TEXT
 from app.data import market, tickers
-from app.ui.components import chart_base, label
+from app.ui.components import chart_base, label, section_hd
 
 
 def _exposure_pie(df: pd.DataFrame, group_col: str, title: str):
@@ -50,21 +51,13 @@ def _market_cap_bucket(market_cap: float) -> str:
 
 
 def _enrich_market_cap(positions: pd.DataFrame) -> pd.DataFrame:
-    """Add `market_cap_bucket` column by re-querying yfinance info (cached)."""
+    """Add `market_cap_bucket` column using cached market.get_info()."""
     if positions.empty:
         return positions
     buckets = []
     for _, r in positions.iterrows():
         info = market.get_info(r["ticker"])
-        mc = info.get("market_cap") if isinstance(info, dict) else None
-        # market.get_info doesn't currently return market_cap — fall back to direct fetch
-        if mc is None:
-            try:
-                import yfinance as yf
-                raw = yf.Ticker(r["ticker"]).info or {}
-                mc = raw.get("marketCap")
-            except Exception:
-                mc = None
+        mc   = info.get("market_cap", 0) if isinstance(info, dict) else 0
         buckets.append(_market_cap_bucket(mc))
     out = positions.copy()
     out["market_cap_bucket"] = buckets
@@ -92,7 +85,7 @@ def render(ps: pd.DataFrame, th: pd.DataFrame, money: Callable[[float], str]) ->
     sector_w = positions.groupby("sector")["market_value"].sum() / total_mv if total_mv else pd.Series()
     top_sector_w = float(sector_w.max()) if not sector_w.empty else 0.0
 
-    label("Exposure Snapshot")
+    st.markdown(section_hd("Exposure Snapshot", "Real-time position breakdown", "Risk"), unsafe_allow_html=True)
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Positions",       f"{len(positions):,}")
     k2.metric("Sectors",         f"{n_sectors}")
@@ -119,7 +112,7 @@ def render(ps: pd.DataFrame, th: pd.DataFrame, money: Callable[[float], str]) ->
     st.markdown("---")
 
     # ── Treemap: sector → company ───────────────────────────────────────────
-    label("Sector × Position Treemap")
+    st.markdown(section_hd("Sector × Position Treemap", "Market value by sector and company", "Treemap"), unsafe_allow_html=True)
     fig = px.treemap(
         positions,
         path=["sector", "company"],
@@ -137,7 +130,7 @@ def render(ps: pd.DataFrame, th: pd.DataFrame, money: Callable[[float], str]) ->
     st.markdown("---")
 
     # ── Correlation heatmap ─────────────────────────────────────────────────
-    label("Position Correlation Matrix — 1-Year Daily Returns")
+    st.markdown(section_hd("Correlation Matrix", "Daily returns — select lookback window below", "Correlation"), unsafe_allow_html=True)
     period_choice = st.select_slider(
         "Lookback window",
         options=["3M", "6M", "1Y", "2Y", "5Y"],
@@ -186,19 +179,94 @@ def render(ps: pd.DataFrame, th: pd.DataFrame, money: Callable[[float], str]) ->
     cstat2.metric("Highly Correlated Pairs (>0.85)", f"{len(high_pairs)}")
 
     if high_pairs:
-        label(f"Top Correlated Pairs")
-        html = '<table class="ptable"><thead><tr>'
+        tbl = '<table class="ptable"><thead><tr>'
         for h in ["#", "Position A", "Position B", "Correlation"]:
-            html += f"<th>{h}</th>"
-        html += "</tr></thead><tbody>"
+            tbl += f"<th>{h}</th>"
+        tbl += "</tr></thead><tbody>"
         for i, (a, b, c) in enumerate(high_pairs[:15], 1):
             ca = ticker_to_company.get(a, a)
             cb = ticker_to_company.get(b, b)
-            html += (
+            tbl += (
                 f'<tr><td style="color:{MUTED};font-size:0.7rem">{i}</td>'
                 f'<td style="font-weight:600">{ca} <span style="color:{MUTED}">({a})</span></td>'
                 f'<td style="font-weight:600">{cb} <span style="color:{MUTED}">({b})</span></td>'
                 f'<td style="color:{RED};font-weight:700;text-align:right">{c:.3f}</td></tr>'
             )
-        html += "</tbody></table>"
-        st.write(html, unsafe_allow_html=True)
+        tbl += "</tbody></table>"
+        st.markdown(
+            f'<div class="card" style="padding:0;overflow:hidden;margin-top:8px">'
+            f'<div class="card-hd-inner">'
+            f'<div class="eyebrow">Concentration Risk</div>'
+            f'<div class="card-title font-display">Top Correlated Pairs</div>'
+            f'</div>'
+            f'<div style="overflow-x:auto">{tbl}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("---")
+
+    # ── Active alerts panel ──────────────────────────────────────────────────
+    st.markdown(section_hd("Active Risk Alerts", "Threshold breach monitoring", "Alerts"), unsafe_allow_html=True)
+    with st.spinner("Checking thresholds…"):
+        alerts = check_all_alerts(positions)
+
+    if not alerts:
+        st.markdown(
+            f'<div class="card" style="border-left:3px solid {GREEN};padding:14px 16px;'
+            f'color:{GREEN};display:flex;align-items:center;gap:10px">'
+            f'<span style="font-size:16px">✅</span>'
+            f'<span>No threshold breaches detected across all risk dimensions.</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        sev_color = {"HIGH": RED, "MEDIUM": GOLD, "LOW": BLUE}
+        sev_emoji = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🔵"}
+        for alert in alerts[:10]:
+            sev   = alert.get("severity", "LOW")
+            color = sev_color.get(sev, BLUE)
+            emoji = sev_emoji.get(sev, "🔵")
+            st.markdown(
+                f'<div class="card" style="border-left:3px solid {color};padding:14px 16px;margin-bottom:8px">'
+                f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
+                f'<span>{emoji}</span>'
+                f'<span class="pill" style="background:rgba(0,0,0,0.3);color:{color};'
+                f'border-color:{color}40;font-size:9px;padding:2px 7px;letter-spacing:0.10em">'
+                f'{sev} · {alert.get("type","")}</span>'
+                f'<span style="font-size:10px;color:{MUTED}">{alert.get("timestamp","")}</span>'
+                f'</div>'
+                f'<div style="font-size:12.5px;color:#CBD5E1;line-height:1.5">{alert.get("message","")}</div>'
+                f'<div style="font-size:11px;color:{MUTED};margin-top:6px">'
+                f'Suggested: {alert.get("suggested_action","")}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        if len(alerts) > 10:
+            st.caption(f"… {len(alerts) - 10} more alerts not shown.")
+
+    st.markdown("---")
+
+    # ── Threshold reference ───────────────────────────────────────────────────
+    st.markdown(section_hd("Alert Thresholds", "Configurable in app/config.py", "Config"), unsafe_allow_html=True)
+    thresh_rows = [
+        ("Max single position", f"{ALERT_THRESHOLDS['max_position_pct']:.0%}"),
+        ("Max sector exposure", f"{ALERT_THRESHOLDS['max_sector_pct']:.0%}"),
+        ("Max currency exposure", f"{ALERT_THRESHOLDS['max_currency_pct']:.0%}"),
+        ("Max pairwise correlation", f"{ALERT_THRESHOLDS['max_correlation']:.2f}"),
+        ("Daily move alert", f"±{ALERT_THRESHOLDS['daily_move_pct']:.0%}"),
+        ("Min health score", f"{ALERT_THRESHOLDS['min_health_score']}/100"),
+    ]
+    rows_html = "".join(
+        f'<div style="display:flex;justify-content:space-between;padding:9px 0;'
+        f'border-bottom:1px solid rgba(148,163,184,0.08)">'
+        f'<span style="color:#CBD5E1">{lbl}</span>'
+        f'<span style="font-family:\'JetBrains Mono\',monospace;color:#F8FAFC">{val}</span>'
+        f'</div>'
+        for lbl, val in thresh_rows
+    )
+    st.markdown(
+        f'<div style="background:{CARD};border:1px solid rgba(148,163,184,0.10);'
+        f'border-radius:10px;padding:16px;max-width:480px">{rows_html}</div>',
+        unsafe_allow_html=True,
+    )

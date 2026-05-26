@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from app.config import GOLD, MUTED, NOGRID, TEXT
-from app.ui.components import chart_base, label, safe_sum
+from app.ui.components import chart_base, label, safe_sum, section_hd
 
 
 def render(dt: pd.DataFrame, money: Callable[[float], str]) -> None:
@@ -14,7 +14,7 @@ def render(dt: pd.DataFrame, money: Callable[[float], str]) -> None:
         st.info("No dividend data found in the uploaded file.")
         return
 
-    label("Dividend Income Summary")
+    st.markdown(section_hd("Dividend Income", "Total received across all holdings", "Income"), unsafe_allow_html=True)
     d1, d2, d3 = st.columns(3)
     d1.metric("Total Dividend Income", money(safe_sum(dt, "received")))
     d2.metric("Paying Companies",      f"{len(dt):,}")
@@ -22,19 +22,18 @@ def render(dt: pd.DataFrame, money: Callable[[float], str]) -> None:
 
     st.markdown("---")
 
-    label("All Dividend Payers — ranked by highest received")
     total_recv = safe_sum(dt, "received")
 
-    html = '<table class="ptable"><thead><tr>'
+    tbl = '<table class="ptable"><thead><tr>'
     for h in ["#", "Company / Fund", "Total Received", "Share"]:
-        html += f"<th>{h}</th>"
-    html += "</tr></thead><tbody>"
+        tbl += f"<th>{h}</th>"
+    tbl += "</tr></thead><tbody>"
 
     for i, (_, r) in enumerate(dt.iterrows(), 1):
         pct = r["received"] / total_recv * 100 if total_recv > 0 else 0
         bar_px = max(4, int(pct * 2.5))
 
-        html += (
+        tbl += (
             f"<tr>"
             f'<td style="color:{MUTED};font-size:0.7rem">{i}</td>'
             f'<td style="font-weight:600">{r["company"]}</td>'
@@ -47,19 +46,29 @@ def render(dt: pd.DataFrame, money: Callable[[float], str]) -> None:
             f"</tr>"
         )
 
-    html += (
+    tbl += (
         f'<tr class="tot">'
         f'<td colspan="2">TOTAL</td>'
         f'<td style="text-align:right;color:{GOLD}">{money(total_recv)}</td>'
         f"<td>100%</td>"
         f"</tr>"
     )
-    html += "</tbody></table>"
-    st.write(html, unsafe_allow_html=True)
+    tbl += "</tbody></table>"
+
+    st.markdown(
+        f'<div class="card" style="padding:0;overflow:hidden">'
+        f'<div class="card-hd-inner">'
+        f'<div class="eyebrow">Dividend Payers</div>'
+        f'<div class="card-title font-display">Ranked by Total Received</div>'
+        f'</div>'
+        f'<div style="overflow-x:auto">{tbl}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
     st.markdown("---")
 
-    label("Top 20 Dividend Payers")
+    st.markdown(section_hd("Top 20 Payers", "Bar chart — sorted by total received", "Chart"), unsafe_allow_html=True)
     top20 = dt.nlargest(20, "received").sort_values("received")
 
     fig = go.Figure(go.Bar(

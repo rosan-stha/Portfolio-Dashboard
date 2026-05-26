@@ -13,7 +13,7 @@ from app.analytics import relative_strength as rs
 from app.analytics import returns as ret
 from app.config import BLUE, BORDER, CARD, GOLD, GREEN, MUTED, NOGRID, RED, TEXT
 from app.data import tickers
-from app.ui.components import chart_base, fmt_pct, label
+from app.ui.components import chart_base, fmt_pct, label, section_hd
 
 
 BENCHMARK_OPTIONS = {
@@ -162,7 +162,7 @@ def render(ps: pd.DataFrame, th: pd.DataFrame, money: Callable[[float], str]) ->
     primary_bench = next((s for s in benchmarks.values() if not s.empty), pd.Series(dtype=float))
     summary = met.summary(portfolio_value, primary_bench if not primary_bench.empty else None)
 
-    label(f"Performance — {period}")
+    st.markdown(section_hd("Performance Metrics", f"Period: {period} · vs {len(bench_choice)} benchmark(s)", "Analytics"), unsafe_allow_html=True)
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Total Return",     fmt_pct(summary["total_return"]))
     k2.metric("CAGR",             fmt_pct(summary["cagr"]))
@@ -182,23 +182,22 @@ def render(ps: pd.DataFrame, th: pd.DataFrame, money: Callable[[float], str]) ->
     st.markdown("---")
 
     # ── Equity curve ────────────────────────────────────────────────────────
-    label("Equity Curve")
+    st.markdown(section_hd("Equity Curve", "Portfolio vs Benchmarks · Rebased to 100", "Returns"), unsafe_allow_html=True)
     st.plotly_chart(_equity_curve(portfolio_value, benchmarks), use_container_width=True)
 
     # ── Drawdown curve ──────────────────────────────────────────────────────
-    label("Drawdown")
+    st.markdown(section_hd("Drawdown", "Peak-to-Trough Decline", "Risk"), unsafe_allow_html=True)
     st.plotly_chart(_drawdown_curve(portfolio_value), use_container_width=True)
 
     st.markdown("---")
 
     # ── Multi-period returns heatmap ────────────────────────────────────────
-    label("Relative Strength — Trailing Returns by Position")
+    st.markdown(section_hd("Relative Strength", "Trailing Returns by Position", "Heatmap"), unsafe_allow_html=True)
     with st.spinner("Computing trailing returns…"):
         pos_rs = rs.position_returns(positions)
     if pos_rs.empty:
         st.info("No position-level returns available.")
     else:
-        # Sort by 1Y return desc
         pos_rs_sorted = pos_rs.sort_values("1Y", ascending=False) if "1Y" in pos_rs.columns else pos_rs
         st.plotly_chart(_returns_heatmap(pos_rs_sorted), use_container_width=True)
 
@@ -213,32 +212,38 @@ def render(ps: pd.DataFrame, th: pd.DataFrame, money: Callable[[float], str]) ->
         st.info("Benchmark data unavailable.")
         return
 
-    # Portfolio summary row for the same periods
-    longest_days = max(rs.PERIODS.values())
     p_series_full = ret.portfolio_value_series(positions, period="2Y")
     portfolio_row = {p: rs._trailing_return(p_series_full, d) for p, d in rs.PERIODS.items()}
 
-    html = '<table class="ptable"><thead><tr>'
+    tbl = '<table class="ptable"><thead><tr>'
     for h in ["Asset", *rs.PERIODS.keys()]:
-        html += f"<th>{h}</th>"
-    html += "</tr></thead><tbody>"
+        tbl += f"<th>{h}</th>"
+    tbl += "</tr></thead><tbody>"
 
-    # Portfolio row (highlighted)
-    html += f'<tr style="background:{BORDER}"><td style="font-weight:700;color:{BLUE}">Your Portfolio</td>'
+    tbl += f'<tr style="background:rgba(59,130,246,0.06)"><td style="font-weight:700;color:{BLUE}">Your Portfolio</td>'
     for p in rs.PERIODS.keys():
         v = portfolio_row.get(p, 0)
         c = GREEN if v > 0 else (RED if v < 0 else MUTED)
-        html += f'<td style="color:{c};font-weight:700;text-align:right">{v * 100:+.2f}%</td>'
-    html += "</tr>"
+        tbl += f'<td style="color:{c};font-weight:700;text-align:right">{v * 100:+.2f}%</td>'
+    tbl += "</tr>"
 
-    # Benchmark rows
     for ticker, row in bench_rs.iterrows():
-        html += f'<tr><td style="font-weight:600">{ticker}</td>'
+        tbl += f'<tr><td style="font-weight:600">{ticker}</td>'
         for p in rs.PERIODS.keys():
             v = row.get(p, 0)
             c = GREEN if v > 0 else (RED if v < 0 else MUTED)
-            html += f'<td style="color:{c};font-weight:600;text-align:right">{v * 100:+.2f}%</td>'
-        html += "</tr>"
+            tbl += f'<td style="color:{c};font-weight:600;text-align:right">{v * 100:+.2f}%</td>'
+        tbl += "</tr>"
 
-    html += "</tbody></table>"
-    st.write(html, unsafe_allow_html=True)
+    tbl += "</tbody></table>"
+
+    st.markdown(
+        f'<div class="card" style="padding:0;overflow:hidden">'
+        f'<div class="card-hd-inner">'
+        f'<div class="eyebrow">Trailing Returns</div>'
+        f'<div class="card-title font-display">Portfolio vs Benchmarks</div>'
+        f'</div>'
+        f'<div style="overflow-x:auto">{tbl}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )

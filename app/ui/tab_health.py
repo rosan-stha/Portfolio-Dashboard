@@ -9,7 +9,7 @@ from app.analytics import health
 from app.analytics import positions as pos
 from app.config import BLUE, BORDER, CARD, GOLD, GREEN, MUTED, NOGRID, RED, TEXT
 from app.data import tickers
-from app.ui.components import chart_base, fmt_pct, label
+from app.ui.components import chart_base, fmt_pct, kpi_card, label, section_hd
 
 
 SUBSCORE_LABELS = {
@@ -112,35 +112,34 @@ def render(ps: pd.DataFrame, th: pd.DataFrame, money: Callable[[float], str]) ->
     # ── Headline row: gauge + radar + raw KPIs ───────────────────────────────
     g_col, r_col = st.columns([1, 1])
     with g_col:
-        label("Portfolio Health Score")
+        st.markdown(section_hd("Portfolio Health Score", "Composite 8-factor model", "Health"), unsafe_allow_html=True)
         st.plotly_chart(_gauge(report.overall), use_container_width=True)
     with r_col:
-        label("Subscore Profile")
+        st.markdown(section_hd("Subscore Profile", "8-dimension radar", "Breakdown"), unsafe_allow_html=True)
         st.plotly_chart(_radar(report.subscores), use_container_width=True)
 
     st.markdown("---")
 
     # ── Subscore cards ───────────────────────────────────────────────────────
     label("Subscore Breakdown")
-    cols = st.columns(4)
-    items = list(report.subscores.items())
-    for i, (key, val) in enumerate(items):
-        with cols[i % 4]:
-            color = _score_color(val)
-            st.markdown(
-                f"""<div style="background:{CARD};border:1px solid {BORDER};border-radius:8px;
-                padding:14px 16px;margin-bottom:10px">
-                  <div style="color:{MUTED};font-size:0.65rem;text-transform:uppercase;
-                              letter-spacing:0.08em;margin-bottom:6px">{SUBSCORE_LABELS[key]}</div>
-                  <div style="color:{color};font-size:1.6rem;font-weight:700">{val:.0f}<span style="color:{MUTED};font-size:0.8rem;font-weight:400"> / 100</span></div>
-                </div>""",
-                unsafe_allow_html=True,
-            )
+    cards_html = ""
+    for key, val in report.subscores.items():
+        vc = "kpi-value--pos" if val >= 75 else ("kpi-value--warn" if val >= 50 else "kpi-value--neg")
+        cards_html += kpi_card(
+            eyebrow_text=SUBSCORE_LABELS[key],
+            value=f"{val:.0f}",
+            value_class=vc,
+            value_suffix=" / 100",
+        )
+    st.markdown(
+        f'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px">{cards_html}</div>',
+        unsafe_allow_html=True,
+    )
 
     st.markdown("---")
 
     # ── Raw metrics strip ────────────────────────────────────────────────────
-    label("Raw Inputs")
+    st.markdown(section_hd("Raw Inputs", "Underlying metrics used in scoring", "Metrics"), unsafe_allow_html=True)
     raw = report.raw_metrics
     k1, k2, k3, k4, k5 = st.columns(5)
     k1.metric("Volatility (ann.)",        fmt_pct(raw.get("volatility", 0)))
@@ -152,38 +151,46 @@ def render(ps: pd.DataFrame, th: pd.DataFrame, money: Callable[[float], str]) ->
     st.markdown("---")
 
     # ── Recommendations ──────────────────────────────────────────────────────
-    label("Recommendations")
+    st.markdown(section_hd("Recommendations", "Priority actions to improve portfolio health", "Actions"), unsafe_allow_html=True)
     for rec in report.recommendations:
         sev = rec["severity"]
         color = SEVERITY_COLORS.get(sev, BLUE)
         badge = sev.upper()
         st.markdown(
-            f"""<div style="background:{CARD};border-left:3px solid {color};
-            border-radius:6px;padding:12px 16px;margin-bottom:8px">
-              <span style="background:{color};color:{CARD};font-size:0.65rem;
-                          font-weight:700;padding:2px 8px;border-radius:4px;
-                          margin-right:10px;letter-spacing:0.05em">{badge}</span>
-              <span style="color:{TEXT};font-size:0.92rem">{rec["text"]}</span>
-            </div>""",
+            f'<div class="card" style="border-left:3px solid {color};padding:14px 16px;margin-bottom:8px">'
+            f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
+            f'<span class="pill" style="background:rgba(0,0,0,0.3);color:{color};'
+            f'border-color:{color}40;font-size:9px;padding:2px 7px;letter-spacing:0.10em">{badge}</span>'
+            f'</div>'
+            f'<div style="color:#CBD5E1;font-size:12.5px;line-height:1.55">{rec["text"]}</div>'
+            f'</div>',
             unsafe_allow_html=True,
         )
 
     # ── Highly correlated pairs (if any) ─────────────────────────────────────
     if report.high_corr_pairs:
         st.markdown("---")
-        label(f"High-Correlation Pairs ({len(report.high_corr_pairs)})")
-        html = '<table class="ptable"><thead><tr>'
+        tbl = '<table class="ptable"><thead><tr>'
         for h in ["#", "Position A", "Position B", "Correlation"]:
-            html += f"<th>{h}</th>"
-        html += "</tr></thead><tbody>"
+            tbl += f"<th>{h}</th>"
+        tbl += "</tr></thead><tbody>"
         for i, (a, b, c) in enumerate(report.high_corr_pairs, 1):
             comp_a = positions.loc[positions["ticker"] == a, "company"].iloc[0] if (positions["ticker"] == a).any() else a
             comp_b = positions.loc[positions["ticker"] == b, "company"].iloc[0] if (positions["ticker"] == b).any() else b
-            html += (
+            tbl += (
                 f'<tr><td style="color:{MUTED};font-size:0.7rem">{i}</td>'
                 f'<td style="font-weight:600">{comp_a} <span style="color:{MUTED}">({a})</span></td>'
                 f'<td style="font-weight:600">{comp_b} <span style="color:{MUTED}">({b})</span></td>'
                 f'<td style="color:{RED};font-weight:700;text-align:right">{c:.3f}</td></tr>'
             )
-        html += "</tbody></table>"
-        st.write(html, unsafe_allow_html=True)
+        tbl += "</tbody></table>"
+        st.markdown(
+            f'<div class="card" style="padding:0;overflow:hidden">'
+            f'<div class="card-hd-inner">'
+            f'<div class="eyebrow">Correlation Risk</div>'
+            f'<div class="card-title font-display">High-Correlation Pairs ({len(report.high_corr_pairs)})</div>'
+            f'</div>'
+            f'<div style="overflow-x:auto">{tbl}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )

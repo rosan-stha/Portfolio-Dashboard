@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from app.config import GOLD, GREEN, MUTED, RED
-from app.ui.components import label, safe_sum
+from app.ui.components import label, safe_sum, section_hd
 
 
 def _tx_color(t: str) -> str:
@@ -17,6 +17,7 @@ def _tx_color(t: str) -> str:
 
 
 def render(th: pd.DataFrame, money: Callable[[float], str]) -> None:
+    st.markdown(section_hd("Activity", "Transaction history — buy · sell · dividend", "History"), unsafe_allow_html=True)
     af1, af2, af3 = st.columns([2, 3, 2])
 
     with af1:
@@ -39,12 +40,10 @@ def render(th: pd.DataFrame, money: Callable[[float], str]) -> None:
     if "date" in view.columns:
         view = view.sort_values("date", ascending=(a_sort == "Oldest first"))
 
-    label(f"Transactions — {len(view):,} shown")
-
-    html = '<table class="ptable"><thead><tr>'
+    tbl = '<table class="ptable"><thead><tr>'
     for h in ["#", "Date", "Type", "Company / Fund", "Amount"]:
-        html += f"<th>{h}</th>"
-    html += "</tr></thead><tbody>"
+        tbl += f"<th>{h}</th>"
+    tbl += "</tr></thead><tbody>"
 
     for i, (_, r) in enumerate(view.iterrows(), 1):
         date_str = r["date"].strftime("%Y-%m-%d") if pd.notna(r.get("date")) else "—"
@@ -53,7 +52,7 @@ def render(th: pd.DataFrame, money: Callable[[float], str]) -> None:
         amt      = r.get("amount", 0)
         tc       = _tx_color(t_type)
 
-        html += (
+        tbl += (
             f"<tr>"
             f'<td style="color:{MUTED};font-size:0.7rem">{i}</td>'
             f"<td>{date_str}</td>"
@@ -63,14 +62,24 @@ def render(th: pd.DataFrame, money: Callable[[float], str]) -> None:
             f"</tr>"
         )
 
-    html += (
+    tbl += (
         f'<tr class="tot">'
         f'<td colspan="4">TOTAL — {len(view):,} transactions</td>'
         f'<td style="text-align:right">{money(safe_sum(view, "amount"))}</td>'
         f"</tr>"
     )
-    html += "</tbody></table>"
-    st.write(html, unsafe_allow_html=True)
+    tbl += "</tbody></table>"
+
+    st.markdown(
+        f'<div class="card" style="padding:0;overflow:hidden">'
+        f'<div class="card-hd-inner">'
+        f'<div class="eyebrow">Transaction History</div>'
+        f'<div class="card-title font-display">{len(view):,} Records</div>'
+        f'</div>'
+        f'<div style="overflow-x:auto">{tbl}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
     st.markdown("")
     csv_tx = view.rename(columns={

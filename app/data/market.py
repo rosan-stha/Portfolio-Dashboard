@@ -93,11 +93,12 @@ def get_info(ticker: str) -> dict:
         yf = _import_yf()
         info = yf.Ticker(ticker).info or {}
         return {
-            "name":     info.get("longName") or info.get("shortName") or ticker,
-            "sector":   info.get("sector") or "Unknown",
-            "industry": info.get("industry") or "Unknown",
-            "country":  info.get("country") or "Unknown",
-            "currency": info.get("currency") or "",
+            "name":       info.get("longName") or info.get("shortName") or ticker,
+            "sector":     info.get("sector") or "Unknown",
+            "industry":   info.get("industry") or "Unknown",
+            "country":    info.get("country") or "Unknown",
+            "currency":   info.get("currency") or "",
+            "market_cap": info.get("marketCap") or 0,
         }
     except Exception:
         return {}

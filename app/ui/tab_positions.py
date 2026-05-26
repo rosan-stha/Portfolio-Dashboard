@@ -14,7 +14,7 @@ import streamlit as st
 from app.analytics import positions as pos
 from app.config import BLUE, CARD, GOLD, GREEN, MUTED, NOGRID, RED, TEXT
 from app.data import tickers
-from app.ui.components import chart_base, fmt_pct, label, tv_url
+from app.ui.components import chart_base, fmt_pct, label, section_hd, tv_url
 
 
 def _color(value: float) -> str:
@@ -59,7 +59,7 @@ def render(ps: pd.DataFrame, th: pd.DataFrame, money: Callable[[float], str]) ->
 
     # ── KPI row ──────────────────────────────────────────────────────────────
     k = pos.portfolio_kpis(positions)
-    label("Live Portfolio")
+    st.markdown(section_hd("Live Portfolio", "Real-time market value and P&L", "Positions"), unsafe_allow_html=True)
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Market Value",      money(k["market_value"]))
     c2.metric("Cost Basis",        money(k["cost_basis"]))
@@ -78,22 +78,20 @@ def render(ps: pd.DataFrame, th: pd.DataFrame, money: Callable[[float], str]) ->
     st.markdown("---")
 
     # ── Positions table ──────────────────────────────────────────────────────
-    label("Holdings — live")
-
     view = positions.sort_values("market_value", ascending=False).reset_index(drop=True)
 
-    html = '<table class="ptable"><thead><tr>'
+    tbl = '<table class="ptable"><thead><tr>'
     for h in ["#", "Company", "Ticker", "Sector", "CCY", "Shares", "Avg Cost",
               "Price (JPY)", "Day %", "Market Value", "Cost Basis", "Unrealized P&L", "Return", "TV"]:
-        html += f"<th>{h}</th>"
-    html += "</tr></thead><tbody>"
+        tbl += f"<th>{h}</th>"
+    tbl += "</tr></thead><tbody>"
 
     for i, (_, r) in enumerate(view.iterrows(), 1):
         pl_color    = _color(r["unrealized_pl"])
         day_color   = _color(r["day_change_pct"])
         day_display = f"{r['day_change_pct'] * 100:+.2f}%"
 
-        html += (
+        tbl += (
             f"<tr>"
             f'<td style="color:{MUTED};font-size:0.7rem">{i}</td>'
             f'<td style="font-weight:600">{r["company"]}</td>'
@@ -113,7 +111,7 @@ def render(ps: pd.DataFrame, th: pd.DataFrame, money: Callable[[float], str]) ->
             f"</tr>"
         )
 
-    html += (
+    tbl += (
         f'<tr class="tot">'
         f'<td colspan="9">TOTAL — {k["n_positions"]:,} live positions</td>'
         f"<td>{money(k['market_value'])}</td>"
@@ -125,8 +123,18 @@ def render(ps: pd.DataFrame, th: pd.DataFrame, money: Callable[[float], str]) ->
         f"<td></td>"
         f"</tr>"
     )
-    html += "</tbody></table>"
-    st.write(html, unsafe_allow_html=True)
+    tbl += "</tbody></table>"
+
+    st.markdown(
+        f'<div class="card" style="padding:0;overflow:hidden">'
+        f'<div class="card-hd-inner">'
+        f'<div class="eyebrow">Live Holdings</div>'
+        f'<div class="card-title font-display">{k["n_positions"]:,} Positions</div>'
+        f'</div>'
+        f'<div style="overflow-x:auto">{tbl}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
     st.markdown("---")
 
@@ -135,7 +143,7 @@ def render(ps: pd.DataFrame, th: pd.DataFrame, money: Callable[[float], str]) ->
         col_pie, col_bar = st.columns(2)
 
         with col_pie:
-            label("Sector Exposure — by Market Value")
+            st.markdown(section_hd("Sector Exposure", "By market value", "Sectors"), unsafe_allow_html=True)
             sec = positions.groupby("sector", as_index=False)["market_value"].sum()
             sec = sec.sort_values("market_value", ascending=False)
             fig = px.pie(
@@ -155,7 +163,7 @@ def render(ps: pd.DataFrame, th: pd.DataFrame, money: Callable[[float], str]) ->
             st.plotly_chart(fig, use_container_width=True)
 
         with col_bar:
-            label("Position Sizing — Top 20 by Market Value")
+            st.markdown(section_hd("Position Sizing", "Top 20 by market value", "Sizing"), unsafe_allow_html=True)
             top = positions.nlargest(20, "market_value").sort_values("market_value")
             fig = go.Figure(go.Bar(
                 x=top["market_value"], y=top["company"],

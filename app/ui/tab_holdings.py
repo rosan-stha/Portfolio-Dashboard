@@ -5,11 +5,11 @@ import pandas as pd
 import streamlit as st
 
 from app.config import BLUE, GOLD, GREEN, MUTED
-from app.ui.components import label, safe_sum, tv_url
+from app.ui.components import label, safe_sum, section_hd, tv_url
 
 
 def render(ps: pd.DataFrame, money: Callable[[float], str]) -> None:
-    # Filters
+    st.markdown(section_hd("Holdings", "Filter · sort · export your portfolio", "Portfolio"), unsafe_allow_html=True)
     fc1, fc2, fc3 = st.columns([3, 2, 2])
 
     with fc1:
@@ -49,13 +49,11 @@ def render(ps: pd.DataFrame, money: Callable[[float], str]) -> None:
 
     view_h = view_h.sort_values(sort_col, ascending=False).reset_index(drop=True)
 
-    label(f"Holdings — {len(view_h):,} positions")
-
-    html = '<table class="ptable"><thead><tr>'
+    tbl = '<table class="ptable"><thead><tr>'
     for col_hdr in ["#", "Company", "Total Bought", "Total Sold",
                     "Net Invested", "Dividends", "Buy Trades", "Last Purchase", "TV"]:
-        html += f"<th>{col_hdr}</th>"
-    html += "</tr></thead><tbody>"
+        tbl += f"<th>{col_hdr}</th>"
+    tbl += "</tr></thead><tbody>"
 
     for i, (_, row) in enumerate(view_h.iterrows(), 1):
         ni  = row.get("net_invested", 0)
@@ -64,7 +62,7 @@ def render(ps: pd.DataFrame, money: Callable[[float], str]) -> None:
         bt  = row.get("buy_trades", 0)
         lp  = str(row.get("last_purchase", "—"))[:10]
 
-        html += (
+        tbl += (
             f"<tr>"
             f'<td style="color:{MUTED};font-size:0.7rem">{i}</td>'
             f"<td style=\"font-weight:600\">{row['company']}</td>"
@@ -79,7 +77,7 @@ def render(ps: pd.DataFrame, money: Callable[[float], str]) -> None:
             f"</tr>"
         )
 
-    html += (
+    tbl += (
         f'<tr class="tot">'
         f'<td colspan="2">TOTAL  ({len(view_h):,} positions)</td>'
         f"<td>{money(safe_sum(view_h, 'total_bought'))}</td>"
@@ -90,8 +88,18 @@ def render(ps: pd.DataFrame, money: Callable[[float], str]) -> None:
         f'<td colspan="2"></td>'
         f"</tr>"
     )
-    html += "</tbody></table>"
-    st.write(html, unsafe_allow_html=True)
+    tbl += "</tbody></table>"
+
+    st.markdown(
+        f'<div class="card" style="padding:0;overflow:hidden">'
+        f'<div class="card-hd-inner">'
+        f'<div class="eyebrow">Holdings</div>'
+        f'<div class="card-title font-display">{len(view_h):,} Positions</div>'
+        f'</div>'
+        f'<div style="overflow-x:auto">{tbl}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
     st.markdown("")
     export_cols = {

@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from app.config import BLUE, CARD, GREEN, MUTED, NOGRID, RED, TEXT
-from app.ui.components import chart_base, label
+from app.ui.components import chart_base, label, section_hd
 
 
 def render(ps: pd.DataFrame, th: pd.DataFrame) -> None:
@@ -14,7 +14,7 @@ def render(ps: pd.DataFrame, th: pd.DataFrame) -> None:
 
     # ── Donut — portfolio allocation ─────────────────────────────────────────
     with left:
-        label("Portfolio Allocation by Net Invested")
+        st.markdown(section_hd("Portfolio Allocation", "Net Invested", "Allocation"), unsafe_allow_html=True)
 
         top15 = ps.nlargest(15, "net_invested")
         others_val = ps.loc[~ps.index.isin(top15.index), "net_invested"].sum()
@@ -43,7 +43,7 @@ def render(ps: pd.DataFrame, th: pd.DataFrame) -> None:
 
     # ── Horizontal bar — Top 20 by Net Invested ──────────────────────────────
     with right:
-        label("Top 20 Holdings by Net Invested")
+        st.markdown(section_hd("Top 20 Holdings", "By Net Invested", "Sizing"), unsafe_allow_html=True)
 
         top20 = ps.nlargest(20, "net_invested").sort_values("net_invested")
         fig = go.Figure(go.Bar(
@@ -67,7 +67,7 @@ def render(ps: pd.DataFrame, th: pd.DataFrame) -> None:
     col_tree, col_month = st.columns(2)
 
     with col_tree:
-        label("Holdings Treemap — sized by Net Invested")
+        st.markdown(section_hd("Holdings Treemap", "Sized by Net Invested", "Treemap"), unsafe_allow_html=True)
 
         tree_df = ps[ps["net_invested"] > 0].copy()
         fig = px.treemap(
@@ -85,7 +85,7 @@ def render(ps: pd.DataFrame, th: pd.DataFrame) -> None:
         st.plotly_chart(fig, use_container_width=True)
 
     with col_month:
-        label("Monthly Buy vs Sell Volume")
+        st.markdown(section_hd("Monthly Volume", "Buy vs Sell", "Activity"), unsafe_allow_html=True)
 
         if "date" in th.columns and "type_en" in th.columns:
             th_m = th.dropna(subset=["date"]).copy()

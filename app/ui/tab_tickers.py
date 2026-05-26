@@ -12,7 +12,7 @@ import streamlit as st
 from app.config import GOLD, GREEN, MUTED, RED
 from app.data import market, tickers
 from app.data.excel_loader import DEMO_COMPANIES_TICKERS
-from app.ui.components import label
+from app.ui.components import label, section_hd
 
 
 def render(ps: pd.DataFrame) -> None:
@@ -23,7 +23,7 @@ def render(ps: pd.DataFrame) -> None:
     mapped = sum(1 for c in ps["company"] if ticker_map.get(c, "").strip())
     unmapped = total - mapped
 
-    label("Ticker Coverage")
+    st.markdown(section_hd("Ticker Coverage", "Yahoo Finance symbol mapping", "Tickers"), unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     c1.metric("Total Companies", f"{total:,}")
     c2.metric("Mapped",          f"{mapped:,}", delta=f"{mapped / total * 100:.0f}%" if total else None)
@@ -76,7 +76,7 @@ def render(ps: pd.DataFrame) -> None:
     st.markdown("---")
 
     # ── Editable table ───────────────────────────────────────────────────────
-    label("Edit Ticker Mappings")
+    st.markdown(section_hd("Edit Mappings", "Company → Yahoo Finance symbol", "Edit"), unsafe_allow_html=True)
     st.caption(
         "Edit the **Ticker** column inline. Leave blank to clear. "
         "Click **Save Changes** to persist. Use the **Validate** button to test "
@@ -158,14 +158,13 @@ def _validate(edited: pd.DataFrame) -> None:
     else:
         st.warning(f"{ok_count} valid, **{bad_count} invalid** — review below.")
 
-    # Render validation table (colour OK column)
-    html = '<table class="ptable"><thead><tr>'
+    tbl = '<table class="ptable"><thead><tr>'
     for h in ["Company", "Ticker", "Name", "Sector", "Price", "Status"]:
-        html += f"<th>{h}</th>"
-    html += "</tr></thead><tbody>"
+        tbl += f"<th>{h}</th>"
+    tbl += "</tr></thead><tbody>"
     for _, r in res_df.iterrows():
         ok_color = GREEN if r["OK"] == "✅" else RED
-        html += (
+        tbl += (
             f"<tr>"
             f'<td style="font-weight:600">{r["Company"]}</td>'
             f'<td style="color:{GOLD};font-weight:600">{r["Ticker"]}</td>'
@@ -175,5 +174,14 @@ def _validate(edited: pd.DataFrame) -> None:
             f'<td style="text-align:center;color:{ok_color};font-weight:700">{r["OK"]}</td>'
             f"</tr>"
         )
-    html += "</tbody></table>"
-    st.write(html, unsafe_allow_html=True)
+    tbl += "</tbody></table>"
+    st.markdown(
+        f'<div class="card" style="padding:0;overflow:hidden">'
+        f'<div class="card-hd-inner">'
+        f'<div class="eyebrow">Validation Results</div>'
+        f'<div class="card-title font-display">{ok_count} valid · {bad_count} invalid</div>'
+        f'</div>'
+        f'<div style="overflow-x:auto">{tbl}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
