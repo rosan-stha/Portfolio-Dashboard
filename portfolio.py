@@ -9,7 +9,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-html_path = pathlib.Path(__file__).parent / "Atlas Terminal _offline_.html"
+html_path = pathlib.Path(__file__).parent / "portfolio-manager" / "project" / "Portfolio Manager.html"
 html_content = html_path.read_text(encoding="utf-8")
 
 # Inject JS into the offline HTML that reaches up to the parent Streamlit page,
