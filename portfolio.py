@@ -5,20 +5,25 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 import datetime
+from typing import Callable
 
+import pandas as pd
+import plotly.express as px
 import streamlit as st
 
-from app.config import DEFAULT_USD_JPY
+from app.config import CARD, DEFAULT_USD_JPY, GOLD, GREEN, MUTED, RED, TEXT
 from app.data import tickers
 from app.data.excel_loader import load_excel, make_demo
 from app.ui import theme
 from app.ui.components import (
     ai_insight_card,
+    chart_base,
     kpi_card,
     label,
     money_formatter,
     news_ticker,
     safe_sum,
+    section_hd,
 )
 from app.ui.tab_activity import render as render_activity
 from app.ui.tab_chat import render as render_chat
@@ -211,6 +216,123 @@ def _render_market_overview():
   <div style="display:grid;grid-template-columns:1fr 1fr">{tiles}</div>
 </div>
 """, unsafe_allow_html=True)
+
+
+def _render_allocation_donut(ps: pd.DataFrame) -> None:
+    """Allocation donut for the dashboard hero row."""
+    st.markdown(
+        section_hd("Portfolio Allocation", "Net Invested · Top 15 positions", "Allocation"),
+        unsafe_allow_html=True,
+    )
+    top15 = ps.nlargest(15, "net_invested")
+    others = ps.loc[~ps.index.isin(top15.index), "net_invested"].sum()
+    donut_df = top15[["company", "net_invested"]].copy()
+    if others > 0:
+        donut_df = pd.concat(
+            [donut_df, pd.DataFrame([{"company": "Others", "net_invested": others}])],
+            ignore_index=True,
+        )
+    fig = px.pie(
+        donut_df, values="net_invested", names="company", hole=0.55,
+        color_discrete_sequence=px.colors.qualitative.Pastel,
+    )
+    fig.update_traces(
+        textfont_color=TEXT, textinfo="percent",
+        hovertemplate="<b>%{label}</b><br>¥%{value:,.0f}<br>%{percent}<extra></extra>",
+    )
+    fig.update_layout(
+        **chart_base(height=380, showlegend=True),
+        legend=dict(bgcolor=CARD, font=dict(color=TEXT, size=9)),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_activity_compact(th: pd.DataFrame, money: Callable) -> None:
+    """Compact recent-transaction feed for the dashboard 3-col row."""
+    view = th.copy()
+    if "date" in view.columns:
+        view = view.sort_values("date", ascending=False).head(8)
+
+    rows = ""
+    for _, r in view.iterrows():
+        t_type = str(r.get("type_en", r.get("tx_type", "—")))
+        color = GREEN if "buy" in t_type.lower() else (RED if "sell" in t_type.lower() else GOLD)
+        date_s = r["date"].strftime("%m/%d") if pd.notna(r.get("date")) else "—"
+        company = str(r.get("company", "—"))[:18]
+        amt = money(r.get("amount", 0))
+        badge = t_type.capitalize()[:4]
+        rows += (
+            f"<tr>"
+            f'<td style="color:{MUTED};font-size:10px">{date_s}</td>'
+            f'<td style="font-weight:600;font-size:11px">{company}</td>'
+            f'<td style="color:{color};font-weight:700;text-align:right;font-size:10px">{badge}</td>'
+            f'<td style="text-align:right;font-size:11px">{amt}</td>'
+            f"</tr>"
+        )
+
+    st.markdown(
+        f'<div class="card" style="padding:0;overflow:hidden">'
+        f'<div class="card-hd-inner">'
+        f'<div class="eyebrow">Activity</div>'
+        f'<div class="card-title font-display">Recent Transactions</div>'
+        f'</div>'
+        f'<div style="overflow-x:auto">'
+        f'<table class="ptable" style="font-size:11px">'
+        f"<thead><tr>"
+        f"<th>Date</th><th>Company</th><th style='text-align:right'>Type</th>"
+        f"<th style='text-align:right'>Amount</th>"
+        f"</tr></thead>"
+        f"<tbody>{rows}</tbody>"
+        f"</table></div></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_dividends_compact(dt: pd.DataFrame, money: Callable) -> None:
+    """Compact top dividend payers for the dashboard 3-col row."""
+    if dt.empty or safe_sum(dt, "received") == 0:
+        st.markdown(
+            '<div class="card" style="padding:16px">'
+            '<div class="eyebrow">Income</div>'
+            '<div class="card-title font-display">Dividends</div>'
+            '<div style="color:#64748B;font-size:12px;margin-top:8px">No dividend data.</div>'
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    total = safe_sum(dt, "received")
+    rows = ""
+    for _, r in dt.head(8).iterrows():
+        pct = r["received"] / total * 100 if total > 0 else 0
+        bar_w = max(4, int(pct * 1.5))
+        rows += (
+            f"<tr>"
+            f'<td style="font-weight:600;font-size:11px">{str(r["company"])[:20]}</td>'
+            f'<td style="color:{GOLD};font-weight:700;text-align:right;font-size:11px">{money(r["received"])}</td>'
+            f'<td style="text-align:right;white-space:nowrap">'
+            f'<span style="font-size:10px;color:{MUTED}">{pct:.1f}%</span>&nbsp;'
+            f'<span style="display:inline-block;width:{bar_w}px;height:5px;'
+            f'background:{GOLD};border-radius:2px;vertical-align:middle;opacity:0.7"></span>'
+            f"</td></tr>"
+        )
+
+    st.markdown(
+        f'<div class="card" style="padding:0;overflow:hidden">'
+        f'<div class="card-hd-inner">'
+        f'<div class="eyebrow">Income</div>'
+        f'<div class="card-title font-display">Top Dividend Payers</div>'
+        f'<div class="card-sub">{money(total)} total received</div>'
+        f'</div>'
+        f'<div style="overflow-x:auto">'
+        f'<table class="ptable" style="font-size:11px">'
+        f"<thead><tr>"
+        f"<th>Company</th><th style='text-align:right'>Received</th><th style='text-align:right'>Share</th>"
+        f"</tr></thead>"
+        f"<tbody>{rows}</tbody>"
+        f"</table></div></div>",
+        unsafe_allow_html=True,
+    )
 
 
 def _render_footer():
@@ -408,28 +530,25 @@ news_ticker([
 if active_page == "Dashboard":
     _render_kpi_row(ps, money, sym, usd_rate, num_pos)
 
-    # Row 1: AI Insights + Market Overview (neither creates nested columns)
-    c_ai, c_mkt = st.columns([3, 2])
+    # Row 1: Allocation donut (2/3) + AI Insights (1/3) — mirrors Atlas Terminal equity + AI layout
+    c_alloc, c_ai = st.columns([2, 1])
+    with c_alloc:
+        _render_allocation_donut(ps)
     with c_ai:
         _render_ai_insights()
+
+    # Row 2: Market Overview + Recent Activity + Top Dividends (3-col)
+    c_mkt, c_act, c_div = st.columns(3)
     with c_mkt:
         _render_market_overview()
+    with c_act:
+        _render_activity_compact(th, money)
+    with c_div:
+        _render_dividends_compact(dt, money)
 
     st.markdown("---")
     label("Holdings")
     render_holdings(ps, money)
-
-    st.markdown("---")
-    label("Sector Allocation")
-    render_overview(ps, th)
-
-    st.markdown("---")
-    label("Activity & Dividends")
-    c_act, c_div = st.columns(2)
-    with c_act:
-        render_activity(th, money)
-    with c_div:
-        render_dividends(dt, money)
 
     _render_footer()
 
