@@ -1,0 +1,132 @@
+/* Portfolio Intelligence — theme tokens
+   Aesthetic: serious financial-pro tool. Monospace numbers, restrained palette,
+   single strong accent, Japan-style gain/loss colors by default (red = up). */
+
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+JP:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Serif:wght@400;500;600&display=swap");
+
+:root, .theme-light {
+  --bg:        #f5f3ec;
+  --bg-2:      #ebe7da;
+  --surface:   #ffffff;
+  --surface-2: #fbfaf5;
+  --text:      #0c0c0c;
+  --text-2:    #3d3d36;
+  --muted:     #767168;
+  --border:    #e2ddcd;
+  --border-2:  #d6cfbb;
+  --accent:    #c8102e;   /* Japanese flag red — also default "up" */
+  --gain:      #c8102e;
+  --loss:      #1f6e3a;
+  --neutral:   #6b6b62;
+  --warn:      #c87f10;
+  --chart-bench-1: #5b6470;  /* TOPIX */
+  --chart-bench-2: #a08a4f;  /* Nikkei */
+  --grid:      #ece6d5;
+  --hi:        #fef9b8;       /* highlight */
+}
+
+.theme-dark {
+  --bg:        #0a0a0a;
+  --bg-2:      #141414;
+  --surface:   #181715;
+  --surface-2: #1f1d1a;
+  --text:      #f3efe2;
+  --text-2:    #c5bfad;
+  --muted:     #8a8478;
+  --border:    #2a2722;
+  --border-2:  #3a3530;
+  --accent:    #ff5d4d;
+  --gain:      #ff5d4d;
+  --loss:      #4dc97d;
+  --neutral:   #9a9488;
+  --warn:      #e2a64a;
+  --chart-bench-1: #898a83;
+  --chart-bench-2: #c2a96a;
+  --grid:      #232220;
+  --hi:        #3b3622;
+}
+
+/* Western convention override: green = up, red = down */
+.gl-western {
+  --gain: #1f6e3a;
+  --loss: #c8102e;
+}
+.theme-dark.gl-western {
+  --gain: #4dc97d;
+  --loss: #ff5d4d;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "IBM Plex Sans", "IBM Plex Sans JP", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "ss01", "cv11";
+  min-width: 1440px;
+}
+
+.mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.serif { font-family: "IBM Plex Serif", Georgia, serif; }
+.jp { font-family: "IBM Plex Sans JP", "IBM Plex Sans", system-ui, sans-serif; }
+
+.eyebrow {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.divider { height: 1px; background: var(--border); border: 0; margin: 0; }
+.vdivider { width: 1px; background: var(--border); align-self: stretch; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12.5px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 100ms;
+}
+.btn:hover { background: var(--bg-2); border-color: var(--border-2); }
+.btn.active { background: var(--text); color: var(--surface); border-color: var(--text); }
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 2px;
+  background: var(--bg-2);
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.tag.tag--nisa-t { background: color-mix(in oklab, var(--gain) 12%, var(--surface)); color: var(--gain); border-color: color-mix(in oklab, var(--gain) 25%, var(--border)); }
+.tag.tag--nisa-g { background: color-mix(in oklab, var(--accent) 12%, var(--surface)); color: var(--accent); border-color: color-mix(in oklab, var(--accent) 25%, var(--border)); }
+.tag.tag--tokutei { background: var(--bg-2); color: var(--text-2); }
+
+.gain { color: var(--gain); }
+.loss { color: var(--loss); }
+
+::selection { background: var(--text); color: var(--surface); }
+
+/* scrollbar tweak */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
