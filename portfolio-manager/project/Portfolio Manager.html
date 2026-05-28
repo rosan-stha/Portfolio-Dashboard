@@ -307,6 +307,90 @@ table.term tr:last-child td{border-bottom:0}
   })();
   </script>
 
+  <!-- ── Stock Analysis: Data Layer ── -->
+  <script>
+  (function(){
+    // ── Currency formatter ──────────────────────────────────────────────────
+    window.fmtCurr=function(v,currency,compact){
+      currency=currency||'USD';compact=compact!==false;
+      if(v==null||isNaN(+v))return'—';
+      var abs=Math.abs(+v),neg=+v<0?'−':'',sym=currency==='JPY'?'¥':'$';
+      if(!compact)return neg+sym+Math.round(abs).toLocaleString();
+      if(abs>=1e12)return neg+sym+(abs/1e12).toFixed(2)+'T';
+      if(abs>=1e9) return neg+sym+(abs/1e9).toFixed(2)+'B';
+      if(abs>=1e6) return neg+sym+(abs/1e6).toFixed(2)+'M';
+      if(abs>=1e3) return neg+sym+(abs/1e3).toFixed(1)+'K';
+      return neg+sym+(+v).toFixed(2);
+    };
+    // ── Watchlist (localStorage) ────────────────────────────────────────────
+    var WL='pm_v31_wl';
+    window.loadWatchlist=function(){try{return JSON.parse(localStorage.getItem(WL))||[];}catch(e){return[];}};
+    window.saveWatchlist=function(l){try{localStorage.setItem(WL,JSON.stringify(l));}catch(e){}};
+    window.addToWatchlist=function(t){var l=window.loadWatchlist();if(!l.includes(t)){l.push(t);window.saveWatchlist(l);}};
+    window.removeFromWatchlist=function(t){window.saveWatchlist(window.loadWatchlist().filter(function(x){return x!==t;}));};
+    // ── TradingView symbol ──────────────────────────────────────────────────
+    window.toTvSymbol=function(ticker,exName){
+      var m=ticker.match(/^(\d+)\.T$/);if(m)return'TSE:'+m[1];
+      var map={NMS:'NASDAQ',NGM:'NASDAQ',NYQ:'NYSE',NYE:'NYSE',PCX:'NYSE',ASE:'AMEX',TOR:'TSX',FRA:'FWB'};
+      var ex=map[exName]||'';return ex?ex+':'+ticker:ticker;
+    };
+    // ── Fetch Yahoo Finance quoteSummary ────────────────────────────────────
+    window.fetchStockAnalysis=async function(ticker){
+      var mods='summaryDetail,financialData,defaultKeyStatistics,incomeStatementHistory,cashflowStatementHistory,balanceSheetHistory,quoteType,assetProfile,price';
+      var url='https://query2.finance.yahoo.com/v10/finance/quoteSummary/'+encodeURIComponent(ticker)+'?modules='+mods+'&lang=en-US&region=US';
+      var proxy='https://api.allorigins.win/raw?url='+encodeURIComponent(url);
+      async function go(u){var r=await fetch(u,{headers:{Accept:'application/json'}});if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
+      var json;try{json=await go(url);}catch(e){json=await go(proxy);}
+      var err=json.quoteSummary&&json.quoteSummary.error;
+      if(err)throw new Error((err.description||err.code||'Ticker not found'));
+      var res=json.quoteSummary&&json.quoteSummary.result&&json.quoteSummary.result[0];
+      if(!res)throw new Error('No data for: '+ticker);
+      return res;
+    };
+    // ── Parse quoteSummary into app-friendly shape ──────────────────────────
+    window.parseStockData=function(r,ticker){
+      function s(obj,k){try{var v=obj&&obj[k];return v&&typeof v==='object'&&'raw' in v?v.raw:v!=null?v:null;}catch(e){return null;}}
+      var p=r.price||{},sd=r.summaryDetail||{},fd=r.financialData||{},ks=r.defaultKeyStatistics||{},ap=r.assetProfile||{},qt=r.quoteType||{};
+      var cur=s(p,'currency')||'USD';
+      var shares=s(ks,'sharesOutstanding')||s(p,'sharesOutstanding')||0;
+      var fcfTtm=s(fd,'freeCashflow')||0;
+      var cash=s(fd,'totalCash')||0, debt=s(fd,'totalDebt')||0;
+      var quote={
+        name:s(p,'longName')||s(qt,'longName')||ticker,
+        exchangeName:s(p,'exchangeName')||s(qt,'exchange')||'',
+        currency:cur,
+        price:s(p,'regularMarketPrice')||0,
+        change:s(p,'regularMarketChange')||0,
+        changePct:s(p,'regularMarketChangePercent')||0,
+        marketCap:s(p,'marketCap')||s(sd,'marketCap')||0,
+        pe:s(sd,'trailingPE')||null,
+        forwardPe:s(sd,'forwardPE')||null,
+        evEbitda:s(ks,'enterpriseToEbitda')||null,
+        week52Hi:s(sd,'fiftyTwoWeekHigh')||0,
+        week52Lo:s(sd,'fiftyTwoWeekLow')||0,
+        sector:ap.sector||'',industry:ap.industry||'',
+        sharesOut:shares,totalCash:cash,totalDebt:debt,
+        freeCashflow:fcfTtm,
+        revenueTtm:s(fd,'totalRevenue')||0,
+        grossMargins:s(fd,'grossMargins'),
+        operatingMargins:s(fd,'operatingMargins'),
+        profitMargins:s(fd,'profitMargins'),
+        fcfPerShare:shares>0?fcfTtm/shares:0,
+        netCashPerShare:shares>0?(cash-debt)/shares:0,
+      };
+      function rev(arr){return arr?[].concat(arr).reverse():[];}
+      var is=rev(r.incomeStatementHistory&&r.incomeStatementHistory.incomeStatementHistory);
+      var income=is.map(function(x){return{date:(x.endDate&&x.endDate.fmt||'').slice(0,4),revenue:s(x,'totalRevenue'),grossProfit:s(x,'grossProfit'),operatingIncome:s(x,'operatingIncome'),netIncome:s(x,'netIncome'),eps:s(x,'basicEPS')||s(x,'dilutedEPS')};});
+      var cf=rev(r.cashflowStatementHistory&&r.cashflowStatementHistory.cashflowStatementHistory);
+      var cashflow=cf.map(function(x){var op=s(x,'totalCashFromOperatingActivities')||0,cx=s(x,'capitalExpenditures')||0,sbc=s(x,'stockBasedCompensation')||0;return{date:(x.endDate&&x.endDate.fmt||'').slice(0,4),operatingCF:op,capex:cx,sbc:sbc,fcf:op+cx};});
+      var bs=rev(r.balanceSheetHistory&&r.balanceSheetHistory.balanceSheetHistory);
+      var balanceSheet=bs.map(function(x){var td=(s(x,'shortLongTermDebt')||0)+(s(x,'longTermDebt')||0)||s(x,'longTermDebt')||0;return{date:(x.endDate&&x.endDate.fmt||'').slice(0,4),totalAssets:s(x,'totalAssets'),totalLiab:s(x,'totalLiab'),cash:s(x,'cash')||s(x,'cashAndCashEquivalents'),totalDebt:td,equity:s(x,'totalStockholderEquity')};});
+      var divRate=s(sd,'dividendRate')||0,divYield=s(sd,'dividendYield')||0;
+      return{quote,income,cashflow,balanceSheet,currency:cur,divRate,divYield,ticker};
+    };
+  })();
+  </script>
+
   <!-- ── Primitives ── -->
   <script type="text/babel">
 const FX_T={JPY:1,USD:1/156.4},SYM_T={JPY:"¥",USD:"$"};
@@ -327,6 +411,7 @@ const I={
   bell:<svg viewBox="0 0 20 20" width="15" height="15" fill="none"><path d="M5 8a5 5 0 1 1 10 0v3l2 3H3l2-3V8Zm3 8a2 2 0 0 0 4 0" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/></svg>,
   download:<svg viewBox="0 0 20 20" width="14" height="14" fill="none"><path d="M10 3v10m0 0 4-4m-4 4-4-4M3 16h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>,
   upload:<svg viewBox="0 0 20 20" width="14" height="14" fill="none"><path d="M10 13V3m0 0-4 4m4-4 4 4M3 16h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+  analysis:<svg viewBox="0 0 20 20" width="16" height="16" fill="none"><circle cx="8.5" cy="8.5" r="5" stroke="currentColor" strokeWidth="1.4"/><path d="m13 13 4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M6.5 8.5h4M8.5 6.5v4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>,
 };
 function CardHd({eyebrow,title,sub,right}){return(<div style={{padding:"14px 16px 12px",display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,borderBottom:"1px solid var(--border)"}}><div>{eyebrow&&<div className="eyebrow" style={{marginBottom:4}}>{eyebrow}</div>}<div className="font-display" style={{fontSize:15.5,fontWeight:600}}>{title}</div>{sub&&<div style={{fontSize:11.5,color:"var(--muted)",marginTop:3}}>{sub}</div>}</div>{right&&<div style={{flexShrink:0}}>{right}</div>}</div>);}
 function MiniMeter({value,max,color="var(--cyan)",height=3}){const pct=Math.min(1,Math.max(0,value/max));return(<div style={{width:"100%",height,background:"rgba(148,163,184,0.10)",borderRadius:height/2,overflow:"hidden"}}><div style={{width:(pct*100)+"%",height:"100%",background:color,boxShadow:`0 0 8px ${color}`}}/></div>);}
@@ -360,6 +445,7 @@ function Sidebar({active,setActive,open,onClose}){
     {id:"risk",     label:"Risk",         icon:I.risk},
     {id:"watchlist",label:"Watchlist",    icon:I.watchlist},
     {id:"ai",       label:"AI Insights",  icon:I.ai},
+    {id:"analysis", label:"Stock Analysis",icon:I.analysis},
     {id:"backtest", label:"Backtesting",  icon:I.backtest},
     {id:"settings", label:"Settings",     icon:I.settings},
   ];
@@ -613,6 +699,473 @@ function HoldingsTerm({data,ccy,limit}){
 Object.assign(window,{AIInsights,Watchlist,MarketOverview,NewsTicker,HoldingsTerm});
   </script>
 
+  <!-- ── Stock Analysis: UI Components ── -->
+  <script type="text/babel">
+const _G={GREEN:'#22C55E',RED:'#EF4444',BLUE:'#3B82F6',GOLD:'#F59E0B',CYAN:'#06B6D4'};
+function fC(v,cur,compact){return window.fmtCurr(v,cur||'USD',compact);}
+function fN(v,d=2){if(v==null||isNaN(+v))return'—';return(+v).toFixed(d);}
+function fP(v){if(v==null||isNaN(+v))return'—';return(v*100).toFixed(1)+'%';}
+
+/* ── SVG Bar Chart ─────────────────────────────────────────────── */
+function FinBar({items,height=200,getColor,yFmt,title,showLine,lineItems,lineColor='#06B6D4'}){
+  if(!items||!items.length)return<div style={{height,display:'grid',placeItems:'center',color:'var(--muted)',fontSize:12}}>No data</div>;
+  const W=600,H=height,PL=62,PR=14,PT=14,PB=28,iW=W-PL-PR,iH=H-PT-PB;
+  const fmt=yFmt||(v=>fC(v));
+  const vals=items.map(d=>d.value).filter(v=>v!=null&&!isNaN(v));
+  if(!vals.length)return null;
+  const maxV=Math.max(...vals),minV=Math.min(...vals);
+  const hasNeg=minV<0;
+  const topV=hasNeg?Math.max(Math.abs(maxV),Math.abs(minV)):maxV||1;
+  const range=hasNeg?topV*2:topV;
+  const zeroY=PT+(hasNeg?1-topV/range:1)*iH;
+  const bW=Math.floor(iW/items.length*0.62);
+  const bX=i=>PL+(i+0.19)*(iW/items.length);
+  const vY=v=>{if(v==null)return zeroY;const f=hasNeg?(v+topV)/range:v/topV;return PT+(1-f)*iH;};
+  const ticks=Array.from({length:5},(_,i)=>{const v=hasNeg?i/4*range-topV:i/4*topV;return{v,y:PT+(1-i/4)*iH};});
+  let lY=null;
+  if(showLine&&lineItems&&lineItems.length){
+    const lv=lineItems.map(d=>d.value).filter(v=>v!=null&&!isNaN(v));
+    const lo=Math.min(...lv),lhi=Math.max(...lv)||1;
+    lY=v=>PT+(1-(v-lo)/(lhi-lo||1))*iH;
+  }
+  return(
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:H,display:'block'}}>
+      {ticks.map((t,i)=>(
+        <g key={i}>
+          <line x1={PL} x2={W-PR} y1={t.y} y2={t.y} stroke={Math.abs(t.v)<1?'rgba(148,163,184,0.18)':'rgba(148,163,184,0.06)'} strokeWidth={Math.abs(t.v)<1?1:0.5}/>
+          <text x={PL-4} y={t.y+3.5} fontSize="9" textAnchor="end" fill="#64748B" fontFamily="JetBrains Mono,monospace">{fmt(t.v)}</text>
+        </g>
+      ))}
+      {items.map((d,i)=>{
+        if(d.value==null)return null;
+        const col=getColor?getColor(d.value):_G.BLUE;
+        const top=Math.min(zeroY,vY(d.value));
+        const bH=Math.max(2,Math.abs(zeroY-vY(d.value)));
+        return(
+          <g key={i}>
+            <rect x={bX(i)} y={top} width={bW} height={bH} fill={col} opacity="0.82" rx="2"/>
+            <text x={bX(i)+bW/2} y={d.value>=0?top-3:top+bH+10} fontSize="8.5" textAnchor="middle" fill="#64748B" fontFamily="JetBrains Mono,monospace">{fmt(d.value)}</text>
+            <text x={bX(i)+bW/2} y={H-4} fontSize="8.5" textAnchor="middle" fill="#64748B" fontFamily="JetBrains Mono,monospace">{d.label}</text>
+          </g>
+        );
+      })}
+      {lY&&lineItems&&(()=>{
+        const pts=lineItems.filter(d=>d.value!=null&&!isNaN(d.value)).map((d,i)=>{
+          const bi=items.findIndex(x=>x.label===d.label);
+          const xi=bi>=0?bX(bi)+bW/2:PL+(i+0.5)*(iW/lineItems.length);
+          return`${xi.toFixed(1)},${lY(d.value).toFixed(1)}`;
+        });
+        return pts.length>1?<polyline points={pts.join(' ')} fill="none" stroke={lineColor} strokeWidth="1.5" strokeDasharray="5 3" opacity="0.85" strokeLinecap="round" strokeLinejoin="round"/>:null;
+      })()}
+    </svg>
+  );
+}
+
+/* ── SVG Multi-line Chart ───────────────────────────────────────── */
+function FinLines({series,height=200,yFmt}){
+  if(!series||!series.length)return null;
+  const allV=series.flatMap(s=>s.items.map(d=>d.value).filter(v=>v!=null&&!isNaN(v)));
+  if(!allV.length)return null;
+  const W=600,H=height,PL=56,PR=14,PT=14,PB=28,iW=W-PL-PR,iH=H-PT-PB;
+  const minV=Math.min(...allV),maxV=Math.max(...allV);
+  const range=(maxV-minV)||1;
+  const n=series[0].items.length;
+  const xP=i=>PL+(i/(n-1||1))*iW;
+  const yP=v=>PT+(1-(v-minV)/range)*iH;
+  const fmt=yFmt||(v=>v.toFixed(1));
+  const ticks=Array.from({length:5},(_,i)=>({v:minV+i/4*range,y:PT+(1-i/4)*iH}));
+  return(
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:H,display:'block'}}>
+      {ticks.map((t,i)=>(
+        <g key={i}>
+          <line x1={PL} x2={W-PR} y1={t.y} y2={t.y} stroke='rgba(148,163,184,0.07)' strokeWidth="0.5"/>
+          <text x={PL-4} y={t.y+3.5} fontSize="9" textAnchor="end" fill="#64748B" fontFamily="JetBrains Mono,monospace">{fmt(t.v)}</text>
+        </g>
+      ))}
+      {series[0].items.map((d,i)=>(i===0||i===n-1||i%Math.ceil(n/5)===0)&&(
+        <text key={i} x={xP(i)} y={H-4} fontSize="8.5" textAnchor="middle" fill="#64748B" fontFamily="JetBrains Mono,monospace">{d.label}</text>
+      ))}
+      {series.map((s,si)=>{
+        const pts=s.items.map((d,i)=>d.value!=null?`${xP(i).toFixed(1)},${yP(d.value).toFixed(1)}`:null).filter(Boolean);
+        return pts.length>1?<polyline key={si} points={pts.join(' ')} fill="none" stroke={s.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{filter:`drop-shadow(0 0 3px ${s.color})`}}/>:null;
+      })}
+    </svg>
+  );
+}
+
+/* ── Legend + ACard ─────────────────────────────────────────────── */
+function ChartLegend({items}){
+  return(
+    <div style={{display:'flex',gap:14,flexWrap:'wrap',padding:'6px 0 2px',fontSize:11,color:'var(--text-2)'}}>
+      {items.map((it,i)=>(
+        <span key={i} style={{display:'flex',alignItems:'center',gap:6}}>
+          <span style={{width:16,height:0,borderTop:`2px ${it.dash?'dashed':'solid'} ${it.color}`,display:'inline-block'}}/>
+          {it.name}
+        </span>
+      ))}
+    </div>
+  );
+}
+function ACard({title,sub,children,right}){
+  return(
+    <div className="card" style={{overflow:'hidden',marginBottom:14}}>
+      <div style={{padding:'14px 16px 12px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}}>
+        <div>
+          <div className="font-display" style={{fontSize:14,fontWeight:600}}>{title}</div>
+          {sub&&<div style={{fontSize:11,color:'var(--muted)',marginTop:2}}>{sub}</div>}
+        </div>
+        {right}
+      </div>
+      <div style={{padding:'14px 16px 16px'}}>{children}</div>
+    </div>
+  );
+}
+
+/* ── Quote Header ───────────────────────────────────────────────── */
+function QuoteHeader({q,ticker,onWatch,inWatch}){
+  const pos=q.changePct>=0;
+  const sym=q.currency==='JPY'?'¥':'$';
+  const r52=q.week52Hi>q.week52Lo?(q.price-q.week52Lo)/(q.week52Hi-q.week52Lo):0.5;
+  return(
+    <div className="card card--gradient-edge" style={{padding:'18px 20px',marginBottom:14}}>
+      <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',flexWrap:'wrap',gap:12}}>
+        <div style={{display:'flex',gap:12,alignItems:'flex-start',flex:1,flexWrap:'wrap'}}>
+          <div style={{width:44,height:44,borderRadius:10,background:'linear-gradient(135deg,#1E3A8A,#06B6D4)',display:'grid',placeItems:'center',fontSize:14,fontWeight:700,color:'white',flexShrink:0}}>{ticker.replace(/\.\w+$/,'').slice(0,2)}</div>
+          <div style={{flex:1}}>
+            <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+              <div className="font-display" style={{fontSize:17,fontWeight:700,lineHeight:1.2}}>{q.name}</div>
+              <span className="pill pill--cyan" style={{fontSize:10}}>{ticker}</span>
+              {q.exchangeName&&<span className="pill" style={{fontSize:10}}>{q.exchangeName}</span>}
+            </div>
+            {(q.sector||q.industry)&&<div style={{fontSize:11,color:'var(--muted)',marginTop:3}}>{q.sector}{q.sector&&q.industry?' · ':''}{q.industry}</div>}
+          </div>
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
+          <div style={{textAlign:'right'}}>
+            <div className="mono font-display" style={{fontSize:26,fontWeight:700,color:pos?_G.GREEN:_G.RED}}>{sym}{(+q.price).toLocaleString(undefined,{maximumFractionDigits:2})}</div>
+            <div style={{display:'flex',alignItems:'center',gap:8,justifyContent:'flex-end',marginTop:2}}>
+              <span className={pos?'pos':'neg'} style={{fontWeight:600,fontSize:13}}>{pos?'+':'−'}{Math.abs(q.change).toFixed(2)}</span>
+              <span className={"pill "+(pos?"pill--pos":"pill--neg")}><Triangle2 up={pos}/> {(Math.abs(q.changePct)*100).toFixed(2)}%</span>
+            </div>
+          </div>
+          <button onClick={onWatch} className="btn" style={{background:inWatch?'rgba(34,197,94,0.10)':'transparent',border:`1px solid ${inWatch?'rgba(34,197,94,0.35)':'var(--border)'}`,color:inWatch?_G.GREEN:'var(--text-2)',fontSize:12,padding:'7px 12px',flexShrink:0}}>
+            {inWatch?'✓ Watching':'+ Watch'}
+          </button>
+        </div>
+      </div>
+      <div style={{marginTop:14,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(100px,1fr))',gap:10}}>
+        {[['Market Cap',fC(q.marketCap,q.currency)],['P/E (TTM)',q.pe?fN(q.pe):'—'],['Fwd P/E',q.forwardPe?fN(q.forwardPe):'—'],['EV/EBITDA',q.evEbitda?fN(q.evEbitda):'—'],['52W High',sym+(+q.week52Hi).toLocaleString(undefined,{maximumFractionDigits:2})],['52W Low',sym+(+q.week52Lo).toLocaleString(undefined,{maximumFractionDigits:2})]].map(([l,v])=>(
+          <div key={l}><div style={{fontSize:9.5,color:'var(--muted)',letterSpacing:'0.08em',textTransform:'uppercase',marginBottom:3}}>{l}</div><div className="mono" style={{fontSize:13,fontWeight:600}}>{v}</div></div>
+        ))}
+      </div>
+      {q.week52Hi>q.week52Lo&&(
+        <div style={{marginTop:12}}>
+          <div style={{height:4,background:'rgba(148,163,184,0.10)',borderRadius:2,position:'relative',overflow:'visible'}}>
+            <div style={{width:`${Math.min(100,Math.max(0,r52*100)).toFixed(1)}%`,height:'100%',background:'linear-gradient(90deg,rgba(6,182,212,0.25),var(--cyan))',borderRadius:2}}/>
+            <div style={{position:'absolute',left:`${Math.min(98,Math.max(1,r52*100)).toFixed(1)}%`,top:'50%',width:8,height:8,background:'var(--cyan)',borderRadius:'50%',transform:'translate(-50%,-50%)',boxShadow:'0 0 8px var(--cyan)'}}/>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── TradingView Chart ──────────────────────────────────────────── */
+function TVChartA({ticker,exchangeName}){
+  const sym=window.toTvSymbol(ticker,exchangeName);
+  const [iv,setIv]=React.useState('D');
+  const ivs=[['1D','D'],['1W','W'],['1M','M'],['3M','3M'],['1Y','12M'],['5Y','60M']];
+  const src=`https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(sym)}&interval=${iv}&theme=dark&style=1&timezone=Asia%2FTokyo&locale=en&toolbar_bg=%23050816&hide_side_toolbar=0&allow_symbol_change=0&save_image=0&withdateranges=1&hideideas=1`;
+  return(
+    <ACard title="Price Chart" sub={sym+' · TradingView Advanced'} right={
+      <div className="chips" style={{padding:3,gap:2}}>
+        {ivs.map(([l,v])=><button key={v} className={"chip "+(iv===v?'active':'')} onClick={()=>setIv(v)} style={{padding:'4px 8px',fontSize:11}}>{l}</button>)}
+      </div>
+    }>
+      <iframe src={src} style={{width:'100%',height:460,border:'none',borderRadius:8,display:'block'}} allowtransparency="true"/>
+    </ACard>
+  );
+}
+
+/* ── Financial tabs ─────────────────────────────────────────────── */
+function RevenueTab({income,cur}){
+  const rev=income.filter(d=>d.revenue!=null).map(d=>({label:d.date,value:d.revenue}));
+  const gp=income.filter(d=>d.grossProfit!=null).map(d=>({label:d.date,value:d.grossProfit}));
+  const yoy=rev.map((d,i)=>({label:d.label,value:i>0&&rev[i-1].value?(d.value/rev[i-1].value-1)*100:null}));
+  return(<>
+    <ACard title="Annual Revenue" sub="Total revenue (bar) + YoY growth % (dashed line)">
+      <FinBar items={rev} getColor={()=>_G.BLUE} yFmt={v=>fC(v,cur)} showLine lineItems={yoy} lineColor={_G.GREEN}/>
+      <ChartLegend items={[{name:'Revenue',color:_G.BLUE},{name:'YoY Growth %',color:_G.GREEN,dash:true}]}/>
+    </ACard>
+    <ACard title="Gross Profit" sub="Annual gross profit">
+      <FinBar items={gp} getColor={()=>_G.CYAN} yFmt={v=>fC(v,cur)}/>
+    </ACard>
+  </>);
+}
+function EarningsTab({income,cur}){
+  const ni=income.filter(d=>d.netIncome!=null).map(d=>({label:d.date,value:d.netIncome}));
+  const eps=income.filter(d=>d.eps!=null).map(d=>({label:d.date,value:d.eps}));
+  const epsYoy=eps.map((d,i)=>({label:d.label,value:i>0&&eps[i-1].value?(d.value/eps[i-1].value-1)*100:null}));
+  const pn=v=>v>=0?_G.GREEN:_G.RED;
+  const sym=cur==='JPY'?'¥':'$';
+  return(<>
+    <ACard title="Net Income" sub="Annual net income"><FinBar items={ni} getColor={pn} yFmt={v=>fC(v,cur)}/></ACard>
+    <ACard title="EPS (Basic)" sub="Earnings per share + YoY growth % (dashed line)">
+      <FinBar items={eps} getColor={pn} yFmt={v=>(v<0?'−':'')+sym+Math.abs(v).toFixed(2)} showLine lineItems={epsYoy} lineColor={_G.CYAN}/>
+      <ChartLegend items={[{name:'EPS',color:_G.CYAN},{name:'YoY Growth %',color:_G.CYAN,dash:true}]}/>
+    </ACard>
+  </>);
+}
+function CashFlowTab({cashflow,cur}){
+  const fcf=cashflow.map(d=>({label:d.date,value:d.fcf}));
+  const opCF=cashflow.map(d=>({label:d.date,value:d.operatingCF}));
+  const sbc=cashflow.map(d=>({label:d.date,value:d.sbc||0}));
+  const fcfAfterSbc=cashflow.map(d=>({label:d.date,value:d.sbc?d.fcf-d.sbc:d.fcf}));
+  const hasSBC=cashflow.some(d=>d.sbc&&d.sbc>0);
+  const pn=v=>v>=0?_G.GREEN:_G.RED;
+  return(<>
+    <ACard title="Free Cash Flow" sub="Operating CF − CapEx  ·  green = positive, red = negative">
+      <FinBar items={fcf} getColor={pn} yFmt={v=>fC(v,cur)}/>
+    </ACard>
+    {hasSBC&&<ACard title="FCF vs FCF after SBC" sub="Stock-Based Compensation (gold dashed) is a real cost">
+      <FinBar items={fcfAfterSbc} getColor={v=>v>=0?'rgba(34,197,94,0.65)':'rgba(239,68,68,0.65)'} yFmt={v=>fC(v,cur)} showLine lineItems={sbc} lineColor={_G.GOLD}/>
+      <ChartLegend items={[{name:'FCF after SBC',color:_G.GREEN},{name:'SBC',color:_G.GOLD,dash:true}]}/>
+    </ACard>}
+    <ACard title="Operating Cash Flow" sub="Annual cash from operations">
+      <FinBar items={opCF} getColor={pn} yFmt={v=>fC(v,cur)}/>
+    </ACard>
+  </>);
+}
+function MarginsTab({income}){
+  const mk=(key)=>income.filter(d=>d[key]!=null&&d.revenue).map(d=>({label:d.date,value:d[key]/d.revenue*100}));
+  const series=[{name:'Gross Margin',color:_G.BLUE,items:mk('grossProfit')},{name:'Operating Margin',color:_G.CYAN,items:mk('operatingIncome')},{name:'Net Margin',color:_G.GREEN,items:mk('netIncome')}].filter(s=>s.items.length>0);
+  return(<ACard title="Profit Margins" sub="Annual margins %">
+    <FinLines series={series} height={230} yFmt={v=>v.toFixed(1)+'%'}/>
+    <ChartLegend items={series}/>
+  </ACard>);
+}
+function BalanceSheetTab({balanceSheet,cur}){
+  const f=(k)=>balanceSheet.map(d=>({label:d.date,value:d[k]}));
+  const de=balanceSheet.map(d=>({label:d.date,value:d.equity&&d.totalDebt?d.totalDebt/d.equity:null}));
+  return(<>
+    <ACard title="Assets vs Liabilities">
+      <FinLines series={[{name:'Total Assets',color:_G.BLUE,items:f('totalAssets')},{name:'Total Liabilities',color:_G.RED,items:f('totalLiab')}]} height={210} yFmt={v=>fC(v,cur)}/>
+      <ChartLegend items={[{name:'Assets',color:_G.BLUE},{name:'Liabilities',color:_G.RED}]}/>
+    </ACard>
+    <ACard title="Cash & Debt">
+      <FinLines series={[{name:'Cash',color:_G.GREEN,items:f('cash')},{name:'Debt',color:_G.RED,items:f('totalDebt')}]} height={210} yFmt={v=>fC(v,cur)}/>
+      <ChartLegend items={[{name:'Cash',color:_G.GREEN},{name:'Debt',color:_G.RED}]}/>
+    </ACard>
+    <ACard title="Debt / Equity Ratio" sub="Lower is generally better">
+      <FinBar items={de} getColor={v=>v<1?_G.GREEN:v<2?_G.GOLD:_G.RED} yFmt={v=>v.toFixed(2)+'×'}/>
+    </ACard>
+  </>);
+}
+function FinancialsSection({sd}){
+  const [tab,setTab]=React.useState(0);
+  const tabs=['Revenue','Earnings','Cash Flow','Margins','Balance Sheet'];
+  const cur=sd.currency;
+  return(<div>
+    <div className="chips" style={{marginBottom:14,display:'inline-flex',flexWrap:'wrap',gap:2}}>
+      {tabs.map((t,i)=><button key={i} className={"chip "+(tab===i?'active':'')} onClick={()=>setTab(i)} style={{fontSize:12,padding:'6px 12px'}}>{t}</button>)}
+    </div>
+    {tab===0&&<RevenueTab income={sd.income} cur={cur}/>}
+    {tab===1&&<EarningsTab income={sd.income} cur={cur}/>}
+    {tab===2&&<CashFlowTab cashflow={sd.cashflow} cur={cur}/>}
+    {tab===3&&<MarginsTab income={sd.income}/>}
+    {tab===4&&<BalanceSheetTab balanceSheet={sd.balanceSheet} cur={cur}/>}
+  </div>);
+}
+
+/* ── DCF Calculator ─────────────────────────────────────────────── */
+function DCFCalc({fcfPS,price,ncPS,currency}){
+  const sym=currency==='JPY'?'¥':'$';
+  const [fcf,setFcf]=React.useState(+(fcfPS||0).toFixed(2));
+  const [nc,setNc]=React.useState(+(ncPS||0).toFixed(2));
+  const [g1,setG1]=React.useState(15);
+  const [g2,setG2]=React.useState(8);
+  const [tg,setTg]=React.useState(3);
+  const [dr,setDr]=React.useState(10);
+  function calc(f,gr1,gr2,tgr,drate,ncp){
+    const rows=[];let v=f;
+    for(let yr=1;yr<=10;yr++){const g=(yr<=5?gr1:gr2)/100;v=v*(1+g);const pv=v/Math.pow(1+drate/100,yr);rows.push({yr,fcf:v,pv});}
+    const tVal=(rows[9].fcf*(1+tgr/100))/Math.max(0.001,(drate/100)-(tgr/100));
+    const tPV=tVal/Math.pow(1+drate/100,10);
+    const sumPV=rows.reduce((s,r)=>s+r.pv,0);
+    const intrinsic=sumPV+tPV+(ncp||0);
+    const mos=price>0?(intrinsic-price)/price*100:0;
+    return{rows,tPV,sumPV,intrinsic,mos,tvPct:(sumPV+tPV)>0?tPV/(sumPV+tPV)*100:0};
+  }
+  const res=calc(fcf,g1,g2,tg,dr,nc);
+  const uv=res.intrinsic>price;
+  const drs=[8,9,10,11,12],tgs=[2,2.5,3,3.5,4];
+  const Slider=({label,val,set,min,max,step,suffix})=>(
+    <div>
+      <div style={{fontSize:9.5,color:'var(--muted)',letterSpacing:'0.08em',textTransform:'uppercase',marginBottom:5}}>{label}</div>
+      <div style={{display:'flex',alignItems:'center',gap:8}}>
+        <input type="number" value={val} step={step} onChange={e=>{const n=parseFloat(e.target.value);if(!isNaN(n))set(n);}} className="input mono" style={{width:'100%',fontSize:13,padding:'6px 10px'}}/>
+        {suffix&&<span style={{fontSize:11,color:'var(--muted)',flexShrink:0}}>{suffix}</span>}
+      </div>
+      <input type="range" min={min} max={max} step={step} value={val} onChange={e=>set(parseFloat(e.target.value))} style={{width:'100%',marginTop:4,accentColor:'var(--cyan)'}}/>
+    </div>
+  );
+  return(<div>
+    <div className="card" style={{padding:'18px 20px',marginBottom:14}}>
+      <div className="font-display" style={{fontSize:14,fontWeight:600,marginBottom:14}}>DCF Model Inputs</div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:14}}>
+        <div><div style={{fontSize:9.5,color:'var(--muted)',letterSpacing:'0.08em',textTransform:'uppercase',marginBottom:5}}>FCF / Share</div><input type="number" value={fcf} step="0.01" onChange={e=>setFcf(parseFloat(e.target.value)||0)} className="input mono" style={{width:'100%',fontSize:13,padding:'6px 10px'}}/></div>
+        <div><div style={{fontSize:9.5,color:'var(--muted)',letterSpacing:'0.08em',textTransform:'uppercase',marginBottom:5}}>Net Cash / Share</div><input type="number" value={nc} step="0.01" onChange={e=>setNc(parseFloat(e.target.value)||0)} className="input mono" style={{width:'100%',fontSize:13,padding:'6px 10px'}}/></div>
+        <Slider label="Growth Yr 1–5 %" val={g1} set={setG1} min={0} max={50} step={1} suffix="%"/>
+        <Slider label="Growth Yr 6–10 %" val={g2} set={setG2} min={0} max={30} step={1} suffix="%"/>
+        <Slider label="Terminal Growth %" val={tg} set={setTg} min={0} max={5} step={0.5} suffix="%"/>
+        <Slider label="Discount Rate %" val={dr} set={setDr} min={5} max={20} step={1} suffix="%"/>
+      </div>
+    </div>
+    <div className="card" style={{padding:'18px 20px',marginBottom:14}}>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:14,marginBottom:14}}>
+        {[['Intrinsic Value',sym+Math.abs(res.intrinsic).toFixed(2),uv?_G.GREEN:_G.RED],['Current Price',sym+(+price).toFixed(2),'var(--text)'],['Margin of Safety',(res.mos>=0?'+':'')+res.mos.toFixed(1)+'%',uv?_G.GREEN:_G.RED]].map(([l,v,c])=>(
+          <div key={l}><div style={{fontSize:9.5,color:'var(--muted)',letterSpacing:'0.08em',textTransform:'uppercase',marginBottom:6}}>{l}</div><div className="mono font-display" style={{fontSize:24,fontWeight:700,color:c}}>{v}</div></div>
+        ))}
+      </div>
+      <span className={"pill "+(uv?"pill--pos":"pill--neg")} style={{fontSize:12,marginBottom:14,display:'inline-flex'}}>{uv?'Undervalued':'Overvalued'} · TV = {res.tvPct.toFixed(1)}% of total value</span>
+      <FinBar items={res.rows.map(r=>({label:'Y'+r.yr,value:r.fcf}))} getColor={()=>_G.BLUE} yFmt={v=>sym+Math.abs(v).toFixed(2)} showLine lineItems={res.rows.map(r=>({label:'Y'+r.yr,value:r.pv}))} lineColor={_G.CYAN} height={170}/>
+      <ChartLegend items={[{name:'Projected FCF/share',color:_G.BLUE},{name:'Present Value',color:_G.CYAN,dash:true}]}/>
+      <div style={{overflowX:'auto',marginTop:14}}>
+        <table className="term" style={{minWidth:380}}>
+          <thead><tr><th style={{textAlign:'left'}}>Year</th><th>Projected FCF</th><th>Present Value</th><th>Cumulative PV</th></tr></thead>
+          <tbody>
+            {res.rows.map((r,i)=>{const cum=res.rows.slice(0,i+1).reduce((s,x)=>s+x.pv,0);return(
+              <tr key={r.yr}><td style={{textAlign:'left',color:'var(--cyan)',fontFamily:'JetBrains Mono,monospace',fontSize:12}}>{r.yr}</td><td className="mono" style={{textAlign:'right'}}>{sym}{r.fcf.toFixed(2)}</td><td className="mono" style={{textAlign:'right',color:_G.CYAN}}>{sym}{r.pv.toFixed(2)}</td><td className="mono" style={{textAlign:'right',color:'var(--text-2)'}}>{sym}{cum.toFixed(2)}</td></tr>
+            );})}
+            <tr style={{background:'rgba(6,182,212,0.06)'}}><td style={{textAlign:'left',fontWeight:600}}>Terminal</td><td className="mono" style={{textAlign:'right'}}>—</td><td className="mono" style={{textAlign:'right',color:_G.GOLD,fontWeight:600}}>{sym}{res.tPV.toFixed(2)}</td><td className="mono" style={{textAlign:'right',color:'var(--text)',fontWeight:600}}>{sym}{(res.sumPV+res.tPV).toFixed(2)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <ACard title="Sensitivity Analysis" sub="Intrinsic value · rows = Discount Rate, cols = Terminal Growth">
+      <div style={{overflowX:'auto'}}>
+        <table className="term" style={{minWidth:360}}>
+          <thead><tr><th style={{textAlign:'left'}}>DR \ TG</th>{tgs.map(t=><th key={t}>{t}%</th>)}</tr></thead>
+          <tbody>{drs.map(d=>(
+            <tr key={d}><td style={{textAlign:'left',color:'var(--cyan)',fontFamily:'JetBrains Mono,monospace',fontSize:12}}>{d}%</td>
+              {tgs.map(t=>{const r2=calc(fcf,g1,g2,t,d,nc);const match=d===dr&&t===tg;const u2=r2.intrinsic>price;return(
+                <td key={t} className="mono" style={{textAlign:'right',fontSize:12,fontWeight:match?700:400,color:match?_G.GOLD:u2?_G.GREEN:_G.RED,background:match?'rgba(245,158,11,0.12)':'transparent',boxShadow:match?'inset 0 0 0 1px rgba(245,158,11,0.4)':undefined}}>{sym}{Math.abs(r2.intrinsic).toFixed(1)}</td>
+              );})}
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+    </ACard>
+  </div>);
+}
+
+/* ── Dividend Section ───────────────────────────────────────────── */
+function DividendSection({divRate,divYield,currency}){
+  if(!divRate||divRate<=0)return<div className="card" style={{padding:32,textAlign:'center',color:'var(--muted)',fontSize:13}}>This stock does not pay a dividend.</div>;
+  const sym=currency==='JPY'?'¥':'$';
+  return(<ACard title="Dividend Info" sub="Current dividend data from Yahoo Finance">
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:14}}>
+      {[['Annual DPS',sym+(+divRate).toFixed(2)],['Dividend Yield',((divYield||0)*100).toFixed(2)+'%'],['Currency',currency||'—']].map(([l,v])=>(
+        <div key={l}><div style={{fontSize:9.5,color:'var(--muted)',letterSpacing:'0.08em',textTransform:'uppercase',marginBottom:6}}>{l}</div><div className="mono" style={{fontSize:20,fontWeight:700,color:_G.GOLD}}>{v}</div></div>
+      ))}
+    </div>
+    <div style={{marginTop:12,fontSize:11,color:'var(--muted)'}}>Historical dividend chart requires extended data. Showing current annual rate only.</div>
+  </ACard>);
+}
+
+/* ── Analysis Watchlist ─────────────────────────────────────────── */
+function AnalysisWatchlist({onLoad}){
+  const [list,setList]=React.useState(window.loadWatchlist);
+  function rm(t){window.removeFromWatchlist(t);setList(window.loadWatchlist());}
+  if(!list.length)return<div className="card" style={{padding:40,textAlign:'center'}}><div style={{fontSize:13,color:'var(--muted)',marginBottom:6}}>Watchlist is empty.</div><div style={{fontSize:11,color:'var(--muted-2)'}}>Search a stock and click "+ Watch" to add it.</div></div>;
+  return(<ACard title="Watchlist" sub={list.length+' tickers'}>
+    <div style={{display:'flex',flexDirection:'column',gap:8}}>
+      {list.map(t=>(
+        <div key={t} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',background:'var(--surface-2)',borderRadius:8,border:'1px solid var(--border)'}}>
+          <span className="mono" style={{fontSize:13,fontWeight:600,color:'var(--cyan)',flex:1}}>{t}</span>
+          <button onClick={()=>onLoad(t)} className="btn" style={{fontSize:11,padding:'5px 10px'}}>Load →</button>
+          <button onClick={()=>rm(t)} className="btn" style={{fontSize:11,padding:'5px 10px',color:_G.RED,borderColor:'rgba(239,68,68,0.25)',background:'rgba(239,68,68,0.07)'}}>Remove</button>
+        </div>
+      ))}
+    </div>
+  </ACard>);
+}
+
+/* ── Main Analysis View ─────────────────────────────────────────── */
+function AnalysisView(){
+  const [input,setInput]=React.useState('');
+  const [loading,setLoading]=React.useState(false);
+  const [error,setError]=React.useState('');
+  const [sd,setSd]=React.useState(null);
+  const [tab,setTab]=React.useState('chart');
+  const [wl,setWl]=React.useState(window.loadWatchlist);
+  async function load(t){
+    const tk=t.trim().toUpperCase();if(!tk)return;
+    setLoading(true);setError('');setSd(null);
+    try{const raw=await window.fetchStockAnalysis(tk);setSd(window.parseStockData(raw,tk));setTab('chart');}
+    catch(e){setError(e.message||'Failed to load data');}
+    setLoading(false);
+  }
+  function toggleWatch(){
+    if(!sd)return;
+    wl.includes(sd.ticker)?window.removeFromWatchlist(sd.ticker):window.addToWatchlist(sd.ticker);
+    setWl(window.loadWatchlist());
+  }
+  const inWatch=sd&&wl.includes(sd.ticker);
+  const TABS=[{id:'chart',label:'📈 Chart'},{id:'financials',label:'📊 Financials'},{id:'dcf',label:'🧮 DCF'},{id:'dividends',label:'💰 Dividends'},{id:'watchlist',label:'👁 Watchlist'}];
+  const suggestions=['AAPL','NVDA','MSFT','TSLA','7203.T','6758.T'];
+  return(
+    <div style={{maxWidth:1400}}>
+      {/* Search */}
+      <div className="card card--gradient-edge" style={{padding:'18px 20px',marginBottom:14}}>
+        <div className="eyebrow" style={{marginBottom:8}}>Stock Research · Qualtrim-style Analysis</div>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+          <input className="input mono" value={input} onChange={e=>setInput(e.target.value.toUpperCase())} onKeyDown={e=>e.key==='Enter'&&load(input)} placeholder="AAPL   NVDA   7203.T   6758.T" style={{flex:1,minWidth:180,fontSize:14,padding:'8px 14px',letterSpacing:'0.05em'}}/>
+          <button className="btn btn--primary" onClick={()=>load(input)} disabled={loading} style={{padding:'8px 18px',fontSize:13,fontWeight:600,flexShrink:0}}>{loading?'Loading…':'Search →'}</button>
+        </div>
+        <div style={{display:'flex',gap:6,marginTop:10,flexWrap:'wrap'}}>
+          {suggestions.map(t=><button key={t} className="btn" onClick={()=>{setInput(t);load(t);}} style={{fontSize:11,padding:'4px 10px',fontFamily:'JetBrains Mono,monospace'}}>{t}</button>)}
+        </div>
+      </div>
+      {/* Error */}
+      {error&&<div className="card" style={{padding:'12px 16px',marginBottom:14,background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.25)',color:_G.RED,fontSize:13}}>⚠ {error}</div>}
+      {/* Spinner */}
+      {loading&&<div className="card" style={{padding:60,textAlign:'center'}}><div style={{display:'inline-block',width:32,height:32,border:'3px solid rgba(6,182,212,0.2)',borderTopColor:'var(--cyan)',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/><div style={{marginTop:12,color:'var(--muted)',fontSize:13}}>Fetching {input}…</div><style>{'@keyframes spin{to{transform:rotate(360deg)}}'}</style></div>}
+      {/* Watchlist tab accessible always */}
+      {!sd&&!loading&&tab==='watchlist'&&<AnalysisWatchlist onLoad={t=>{setInput(t);load(t);setTab('chart');}}/>}
+      {!sd&&!loading&&tab!=='watchlist'&&!error&&(
+        <div style={{textAlign:'right',marginBottom:10}}>
+          <button className="btn" onClick={()=>setTab('watchlist')} style={{fontSize:12}}>👁 Watchlist ({wl.length})</button>
+        </div>
+      )}
+      {/* Empty state */}
+      {!sd&&!loading&&!error&&tab!=='watchlist'&&(
+        <div className="card" style={{padding:60,textAlign:'center'}}>
+          <div style={{fontSize:36,marginBottom:12}}>🔍</div>
+          <div className="font-display" style={{fontSize:18,fontWeight:600,marginBottom:8}}>Stock Research Terminal</div>
+          <div style={{fontSize:13,color:'var(--muted)',lineHeight:1.7,maxWidth:420,margin:'0 auto'}}>Enter any ticker to view financials, run a DCF model, and analyze cash flows. Supports US stocks (AAPL, NVDA) and Japanese stocks (7203.T, 6758.T).</div>
+        </div>
+      )}
+      {/* Stock loaded */}
+      {sd&&!loading&&(
+        <>
+          <QuoteHeader q={sd.quote} ticker={sd.ticker} onWatch={toggleWatch} inWatch={inWatch}/>
+          <div className="chips" style={{marginBottom:14,display:'flex',gap:2,padding:3,overflowX:'auto'}}>
+            {TABS.map(t=><button key={t.id} className={"chip "+(tab===t.id?'active':'')} onClick={()=>setTab(t.id)} style={{fontSize:12,padding:'6px 14px',whiteSpace:'nowrap'}}>{t.label}</button>)}
+          </div>
+          {tab==='chart'&&<TVChartA ticker={sd.ticker} exchangeName={sd.quote.exchangeName}/>}
+          {tab==='financials'&&<FinancialsSection sd={sd}/>}
+          {tab==='dcf'&&<DCFCalc fcfPS={sd.quote.fcfPerShare} price={sd.quote.price} ncPS={sd.quote.netCashPerShare} currency={sd.currency}/>}
+          {tab==='dividends'&&<DividendSection divRate={sd.divRate} divYield={sd.divYield} currency={sd.currency}/>}
+          {tab==='watchlist'&&<AnalysisWatchlist onLoad={t=>{setInput(t);load(t);setTab('chart');}}/>}
+        </>
+      )}
+    </div>
+  );
+}
+Object.assign(window,{AnalysisView});
+  </script>
+
   <!-- ── App Shell ── -->
   <script type="text/babel">
 function WelcomeScreen({onUpload}){
@@ -714,6 +1267,7 @@ function App(){
               {active==="ai"         && <AIView     data={data} ccy={ccy}/>}
               {active==="backtest"   && <Backtest   data={data} ccy={ccy}/>}
               {active==="settings"   && <SettingsView data={data}/>}
+              {active==="analysis"   && <AnalysisView/>}
             </>
           )}
         </main>
