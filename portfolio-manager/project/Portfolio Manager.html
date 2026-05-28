@@ -54,7 +54,7 @@ table.term tr:last-child td{border-bottom:0}
 .mob-btn{display:none;align-items:center;justify-content:center;background:transparent;border:1px solid var(--border);color:var(--text-2);width:34px;height:34px;min-width:34px;border-radius:8px;cursor:pointer;flex-shrink:0;padding:0}
 .mob-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:98;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
 .mob-overlay.vis{display:block}
-.side-nav{overflow-y:auto}
+.side-nav{overflow-y:auto;height:100vh;flex-shrink:0}
 .bnav{display:none;position:fixed;bottom:0;left:0;right:0;height:58px;background:rgba(6,10,22,0.97);border-top:1px solid var(--border);z-index:50;align-items:stretch;-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
 @media(max-width:900px){
   .kpi-grid{grid-template-columns:1fr 1fr 1fr!important}
@@ -695,12 +695,12 @@ function App(){
   const isEmpty=!data.mode&&(!data.holdings||data.holdings.length===0);
 
   return(
-    <div style={{display:"flex",minHeight:"100vh"}}>
+    <div style={{display:"flex",height:"100vh",overflow:"hidden"}}>
       <div className={"mob-overlay"+(sideOpen?" vis":"")} onClick={()=>setSideOpen(false)}/>
       <Sidebar active={active} setActive={setActive} open={sideOpen} onClose={()=>setSideOpen(false)}/>
-      <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column"}}>
+      <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",overflow:"hidden"}}>
         <Header period={period} setPeriod={setPeriod} ccy={ccy} setCcy={setCcy} asOf={data.asOf} onMenuClick={()=>setSideOpen(true)}/>
-        <main className="main-pad" style={{padding:"20px 24px 32px",display:"flex",flexDirection:"column",gap:16}}>
+        <main className="main-pad" style={{flex:1,overflowY:"auto",padding:"20px 24px 32px",display:"flex",flexDirection:"column",gap:16}}>
           <NewsTicker data={data}/>
           {isEmpty?(
             <WelcomeScreen onUpload={handleWelcomeUpload}/>
