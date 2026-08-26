@@ -204,19 +204,44 @@ table.term tr:last-child td{border-bottom:0}
     }
     function num(s){return parseFloat(String(s||"0").replace(/,/g,""))||0;}
     function fmtN(n){return Math.round(n).toLocaleString();}
-    var psRaw = remap(parseSheet("Portfolio Summary",3),   PS_ALIASES);
-    var thRaw = remap(parseSheet("Transaction History",1), TH_ALIASES);
-    var dtRaw = remap(parseSheet("Dividend Tracker",1),   DT_ALIASES);
-    var ps = psRaw.filter(function(r){return r.company && !String(r.company).match(/^[▶▼TOTAL合計]/);})
-      .map(function(r){return {company:String(r.company||"").trim(),total_bought:num(r.total_bought),total_sold:num(r.total_sold),net_invested:num(r.net_invested),dividends:num(r.dividends),buy_trades:parseInt(String(r.buy_trades||"0").replace(/,/g,""))||0,last_purchase:r.last_purchase||""};})
-      .filter(function(r){return r.company && r.total_bought>0;});
-    var th = thRaw.filter(function(r){return r.date&&r.company;})
-      .map(function(r){return {date:r.date,company:String(r.company||"").trim(),amount:num(r.amount),type_en:String(r.type_en||"").trim()};})
-      .filter(function(r){return r.amount>0;});
-    var dt = dtRaw.filter(function(r){return r.company;})
-      .map(function(r){return {company:String(r.company||"").trim(),received:num(r.received)};})
-      .filter(function(r){return r.company&&r.received>0;})
-      .sort(function(a,b){return b.received-a.received;});
+    var ps,th,dt;
+    if(workbook.SheetNames.indexOf("Portfolio Summary")===-1){
+      // ── Raw EN export branch (single "Transaction History" sheet) ───────────
+      var rawWs=workbook.Sheets[workbook.SheetNames[0]];
+      var rawAll=XLSX.utils.sheet_to_json(rawWs,{header:1,raw:false,defval:""});
+      var hdrIdx=0;
+      for(var ri=0;ri<Math.min(6,rawAll.length);ri++){if(rawAll[ri].some(function(c){return String(c).match(/Date|Stock/i);})){hdrIdx=ri;break;}}
+      var rawHdrs=rawAll[hdrIdx].map(function(h){return String(h||"").trim();});
+      var rawData=rawAll.slice(hdrIdx+1).map(function(row){var o={};rawHdrs.forEach(function(h,i){if(h)o[h]=String(row[i]||"").trim();});return o;}).filter(function(r){return Object.values(r).some(function(v){return v!=="";});});
+      var TYPE_EN={"Buy":"Buy","Sell":"Sell","Dividend Payment":"Dividend","Distribution Payment":"Dividend"};
+      th=[];
+      rawData.forEach(function(r){
+        var type_en=TYPE_EN[r["Description"]];if(!type_en)return;
+        var company=String(r["Stock/Fund"]||"").trim();if(!company||company==="-")return;
+        var amount=num(r["Order Amount (¥)"]);if(!amount)return;
+        th.push({date:r["Date"],company:company,amount:amount,type_en:type_en});
+      });
+      var psMap={};
+      th.forEach(function(r){
+        if(!psMap[r.company])psMap[r.company]={company:r.company,total_bought:0,total_sold:0,dividends:0,buy_trades:0,last_purchase:"",net_invested:0};
+        var p=psMap[r.company];
+        if(r.type_en==="Buy"){p.total_bought+=r.amount;p.buy_trades++;if(!p.last_purchase||r.date>p.last_purchase)p.last_purchase=r.date;}
+        else if(r.type_en==="Sell"){p.total_sold+=r.amount;}
+        else if(r.type_en==="Dividend"){p.dividends+=r.amount;}
+      });
+      ps=Object.values(psMap).filter(function(r){return r.total_bought>0||r.total_sold>0||r.dividends>0;}).map(function(r){return Object.assign({},r,{net_invested:r.total_bought-r.total_sold});});
+      var dtMap={};
+      th.filter(function(r){return r.type_en==="Dividend";}).forEach(function(r){dtMap[r.company]=(dtMap[r.company]||0)+r.amount;});
+      dt=Object.entries(dtMap).map(function(e){return{company:e[0],received:e[1]};}).filter(function(r){return r.received>0;}).sort(function(a,b){return b.received-a.received;});
+    } else {
+      // ── 3-sheet format branch ────────────────────────────────────────────────
+      var psRaw=remap(parseSheet("Portfolio Summary",3),PS_ALIASES);
+      var thRaw=remap(parseSheet("Transaction History",1),TH_ALIASES);
+      var dtRaw=remap(parseSheet("Dividend Tracker",1),DT_ALIASES);
+      ps=psRaw.filter(function(r){return r.company&&!String(r.company).match(/^[▶▼TOTAL合計]/);}).map(function(r){return{company:String(r.company||"").trim(),total_bought:num(r.total_bought),total_sold:num(r.total_sold),net_invested:num(r.net_invested),dividends:num(r.dividends),buy_trades:parseInt(String(r.buy_trades||"0").replace(/,/g,""))||0,last_purchase:r.last_purchase||""};}).filter(function(r){return r.company&&r.total_bought>0;});
+      th=thRaw.filter(function(r){return r.date&&r.company;}).map(function(r){return{date:r.date,company:String(r.company||"").trim(),amount:num(r.amount),type_en:String(r.type_en||"").trim()};}).filter(function(r){return r.amount>0;});
+      dt=dtRaw.filter(function(r){return r.company;}).map(function(r){return{company:String(r.company||"").trim(),received:num(r.received)};}).filter(function(r){return r.company&&r.received>0;}).sort(function(a,b){return b.received-a.received;});
+    }
     var total_cost=ps.reduce(function(s,r){return s+r.total_bought;},0);
     var total_sold_sum=ps.reduce(function(s,r){return s+r.total_sold;},0);
     var total_net=ps.reduce(function(s,r){return s+r.net_invested;},0);
@@ -480,7 +505,7 @@ function Sidebar({active,setActive,open,onClose}){
           {uploading?(<span style={{color:"var(--cyan)",fontSize:11}}>Reading…</span>):fileName?(
             <><svg viewBox="0 0 16 16" width="13" height="13" fill="none"><path d="M2 8l4 4 8-8" stroke="var(--pos)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg><span style={{color:"var(--pos)",fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:130}}>{fileName}</span></>
           ):(
-            <><svg viewBox="0 0 16 16" width="13" height="13" fill="none"><path d="M8 2v8M5 5l3-3 3 3" stroke="var(--cyan)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 12v2h12v-2" stroke="var(--cyan)" strokeWidth="1.4" strokeLinecap="round"/></svg><span>Upload PayPay Excel</span></>
+            <><svg viewBox="0 0 16 16" width="13" height="13" fill="none"><path d="M8 2v8M5 5l3-3 3 3" stroke="var(--cyan)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 12v2h12v-2" stroke="var(--cyan)" strokeWidth="1.4" strokeLinecap="round"/></svg><span style={{lineHeight:1.3}}><span style={{display:"block"}}>Upload PayPay Export</span><span style={{display:"block",fontSize:9.5,color:"var(--muted)",marginTop:1}}>Transaction History (.xlsx)</span></span></>
           )}
           <input type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={handleFile}/>
         </label>
