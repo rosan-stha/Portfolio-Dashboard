@@ -1,6 +1,5 @@
 import pathlib
 import streamlit as st
-import streamlit.components.v1 as components
 
 st.set_page_config(
     page_title="Atlas Terminal · Portfolio Intelligence",
@@ -43,4 +42,4 @@ inject = """<script>
 </script>"""
 
 html_with_inject = html_content.replace('</head>', inject + '\n</head>', 1)
-components.html(html_with_inject, height=800, scrolling=False)
+st.iframe(html_with_inject, width="stretch", height="stretch")
