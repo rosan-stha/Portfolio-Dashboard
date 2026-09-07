@@ -71,6 +71,31 @@ def tv_url(query: str) -> str:
     return f"https://www.tradingview.com/search/?query={urllib.parse.quote(str(query))}"
 
 
+def ticker_link(name: str, ticker: str, exchange: str) -> str:
+    """HTML anchor that opens TradingView in a new tab at the correct symbol URL.
+
+    - Japan TSE (4-digit.T): https://www.tradingview.com/symbols/TSE-{code}/
+    - US/other (exchange + ticker): https://www.tradingview.com/symbols/{EX}-{TICKER}/
+    - Fallback (no exchange): TradingView search for the company name
+    """
+    import re
+    t = str(ticker).strip()
+    ex = str(exchange or "").strip().upper()
+
+    m = re.match(r"^(\d{4})\.T$", t)
+    if m:
+        url = f"https://www.tradingview.com/symbols/TSE-{m.group(1)}/"
+    elif ex and t:
+        url = f"https://www.tradingview.com/symbols/{ex}-{t}/"
+    else:
+        url = f"https://www.tradingview.com/search/?query={urllib.parse.quote(str(name))}"
+
+    return (
+        f'<a href="{url}" target="_blank" rel="noopener" '
+        f'style="color:{BLUE};text-decoration:none;font-weight:600">{name}</a>'
+    )
+
+
 def safe_sum(df: pd.DataFrame, col: str) -> float:
     return float(df[col].sum()) if col in df.columns else 0.0
 

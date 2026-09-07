@@ -1,104 +1,200 @@
-"""Ticker mapping store — company name → Yahoo Finance symbol.
+"""Ticker mapping store — company name → Yahoo Finance symbol + category/exchange.
 
-Primary store is `st.session_state["ticker_map"]` (survives reruns, dies with
-the session). Best-effort disk persistence at `Files/tickers.json` so local
-users keep their mappings between sessions — silently fails on read-only
-filesystems like Streamlit Cloud.
+Primary store is `st.session_state` (survives reruns, dies with the session).
+Best-effort disk persistence at `Files/tickers.json`.
+
+Disk format (v2):
+    {company: {ticker, category, exchange}}
+
+Backward-compat: old flat {company: ticker_string} format is migrated on read
+and written in v2 format on the next save.
 """
 from __future__ import annotations
 
 import json
-from typing import Dict
+import logging
+from typing import Dict, Tuple
 
 import streamlit as st
 
 from app.config import FILES_DIR, TICKERS_JSON
 from app.data.excel_loader import DEMO_COMPANIES_TICKERS
 
-_SESSION_KEY = "ticker_map"
+_SESSION_TICKERS = "ticker_map"
+_SESSION_META    = "ticker_meta"
+
+logger = logging.getLogger(__name__)
+
+VALID_CATEGORIES = ["American Stock", "Japanese Stock", "ETF", "Mutual Fund", "Other"]
 
 
-def _load_from_disk() -> Dict[str, str]:
+# ── Disk I/O ─────────────────────────────────────────────────────────────────
+
+def _load_from_disk() -> Tuple[Dict[str, str], Dict[str, dict]]:
     if not TICKERS_JSON.exists():
-        return {}
+        return {}, {}
     try:
         with open(TICKERS_JSON, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return {str(k): str(v) for k, v in data.items() if v}
     except Exception:
-        return {}
+        return {}, {}
+
+    ticker_map: Dict[str, str] = {}
+    meta_map:   Dict[str, dict] = {}
+
+    for k, v in data.items():
+        k = str(k)
+        if isinstance(v, str):
+            if v.strip():
+                ticker_map[k] = v.strip()
+        elif isinstance(v, dict):
+            t = str(v.get("ticker", "")).strip()
+            if t:
+                ticker_map[k] = t
+            meta_map[k] = {
+                "category": str(v.get("category", "Other")),
+                "exchange":  str(v.get("exchange", "")),
+            }
+
+    return ticker_map, meta_map
 
 
-def _save_to_disk(mapping: Dict[str, str]) -> bool:
+def _save_to_disk(ticker_map: Dict[str, str], meta_map: Dict[str, dict]) -> None:
     try:
         FILES_DIR.mkdir(parents=True, exist_ok=True)
+        data: Dict[str, dict] = {}
+        for k in sorted(set(ticker_map) | set(meta_map)):
+            data[k] = {
+                "ticker":   ticker_map.get(k, ""),
+                "category": meta_map.get(k, {}).get("category", "Other"),
+                "exchange":  meta_map.get(k, {}).get("exchange", ""),
+            }
         with open(TICKERS_JSON, "w", encoding="utf-8") as f:
-            json.dump(mapping, f, ensure_ascii=False, indent=2, sort_keys=True)
-        return True
-    except Exception:
-        return False
+            json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=True)
+    except Exception as exc:
+        logger.warning("Failed to save tickers.json: %s", exc)
 
+
+# ── Session init ─────────────────────────────────────────────────────────────
+
+def _init() -> Tuple[Dict[str, str], Dict[str, dict]]:
+    if _SESSION_TICKERS not in st.session_state:
+        tm, mm = _load_from_disk()
+        st.session_state[_SESSION_TICKERS] = tm
+        st.session_state[_SESSION_META]    = mm
+    return st.session_state[_SESSION_TICKERS], st.session_state[_SESSION_META]
+
+
+# ── Public API — ticker map ───────────────────────────────────────────────────
 
 def init() -> Dict[str, str]:
-    """Ensure session_state has a ticker map; load from disk if first call."""
-    if _SESSION_KEY not in st.session_state:
-        st.session_state[_SESSION_KEY] = _load_from_disk()
-    return st.session_state[_SESSION_KEY]
+    """Ensure session_state has a ticker map; return it."""
+    tm, _ = _init()
+    return tm
 
 
 def all_mappings() -> Dict[str, str]:
-    """Current full mapping (session_state)."""
     return init()
 
 
 def get(company: str) -> str:
-    """Return ticker for a company, '' if unmapped."""
     return init().get(company, "")
 
 
-def set_many(mapping: Dict[str, str]) -> None:
-    """Overwrite the mapping with a fresh dict and persist to disk."""
+# ── Public API — meta (category / exchange) ───────────────────────────────────
+
+def all_meta() -> Dict[str, dict]:
+    """Return full meta map: {company: {category, exchange}}."""
+    _, mm = _init()
+    return mm
+
+
+def get_meta(company: str) -> dict:
+    _, mm = _init()
+    return mm.get(company, {"category": "Other", "exchange": ""})
+
+
+# ── Write operations ──────────────────────────────────────────────────────────
+
+def set_many(mapping: Dict[str, str], meta: Dict[str, dict] | None = None) -> None:
+    """Replace the ticker map. Optionally replace meta too."""
     cleaned = {str(k).strip(): str(v).strip() for k, v in mapping.items() if v and str(v).strip()}
-    st.session_state[_SESSION_KEY] = cleaned
-    _save_to_disk(cleaned)
+    _init()  # ensure both session keys exist before writing
+    st.session_state[_SESSION_TICKERS] = cleaned
+    if meta is not None:
+        st.session_state[_SESSION_META] = {str(k).strip(): v for k, v in meta.items()}
+    _save_to_disk(st.session_state[_SESSION_TICKERS], st.session_state[_SESSION_META])
 
 
-def update(company: str, ticker: str) -> None:
-    """Set/unset a single company's ticker."""
-    m = init()
+def update(company: str, ticker: str, category: str = "", exchange: str = "") -> None:
+    """Set or clear a single company's ticker and/or meta."""
+    tm, mm = _init()
     company = str(company).strip()
-    ticker = str(ticker).strip()
+    ticker  = str(ticker).strip()
+
     if ticker:
-        m[company] = ticker
+        tm[company] = ticker
     else:
-        m.pop(company, None)
-    st.session_state[_SESSION_KEY] = m
-    _save_to_disk(m)
+        tm.pop(company, None)
+
+    if category or exchange:
+        existing = mm.get(company, {"category": "Other", "exchange": ""})
+        mm[company] = {
+            "category": category or existing["category"],
+            "exchange":  exchange  or existing["exchange"],
+        }
+
+    st.session_state[_SESSION_TICKERS] = tm
+    st.session_state[_SESSION_META]    = mm
+    _save_to_disk(tm, mm)
 
 
 def seed_demo(companies: list[str]) -> None:
-    """Pre-fill the mapping with demo tickers — only for companies present in the
-    provided list AND missing from the current mapping. Never overwrites."""
-    m = init()
+    """Pre-fill ticker map with known demo tickers; never overwrites."""
+    tm, mm = _init()
     added = False
     for c in companies:
-        if c not in m and c in DEMO_COMPANIES_TICKERS:
-            m[c] = DEMO_COMPANIES_TICKERS[c]
+        if c not in tm and c in DEMO_COMPANIES_TICKERS:
+            tm[c] = DEMO_COMPANIES_TICKERS[c]
             added = True
     if added:
-        st.session_state[_SESSION_KEY] = m
-        _save_to_disk(m)
+        st.session_state[_SESSION_TICKERS] = tm
+        _save_to_disk(tm, mm)
 
+
+# ── Import / export ───────────────────────────────────────────────────────────
 
 def export_json() -> str:
-    """Serialize the current mapping for download."""
-    return json.dumps(all_mappings(), ensure_ascii=False, indent=2, sort_keys=True)
+    tm, mm = _init()
+    data: Dict[str, dict] = {}
+    for k in sorted(set(tm) | set(mm)):
+        data[k] = {
+            "ticker":   tm.get(k, ""),
+            "category": mm.get(k, {}).get("category", "Other"),
+            "exchange":  mm.get(k, {}).get("exchange", ""),
+        }
+    return json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True)
 
 
 def import_json(text: str) -> int:
     """Replace mapping from a JSON blob. Returns number of entries loaded."""
     data = json.loads(text)
     if not isinstance(data, dict):
-        raise ValueError("JSON must be an object of {company: ticker}")
-    set_many({str(k): str(v) for k, v in data.items()})
-    return len(all_mappings())
+        raise ValueError("JSON must be an object of {company: ...}")
+    tm: Dict[str, str] = {}
+    mm: Dict[str, dict] = {}
+    for k, v in data.items():
+        k = str(k).strip()
+        if isinstance(v, str):
+            if v.strip():
+                tm[k] = v.strip()
+        elif isinstance(v, dict):
+            t = str(v.get("ticker", "")).strip()
+            if t:
+                tm[k] = t
+            mm[k] = {
+                "category": str(v.get("category", "Other")),
+                "exchange":  str(v.get("exchange", "")),
+            }
+    set_many(tm, mm)
+    return len(tm)
