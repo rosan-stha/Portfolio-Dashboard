@@ -1,85 +1,189 @@
-"""Excel loader + demo-data generator.
+"""Excel loader for the single-sheet PayPay transaction log.
 
-The user's Excel file has three sheets — Portfolio Summary, Transaction History,
-Dividend Tracker — with header names that vary between Japanese and English. The
-column-resolver maps each acceptable variant to a single internal key.
+Expected exact column headers (all 8 must be present):
+    Date | Security | Description | Account Type |
+    Order Amount | Price | FX Rate | Amount (Shares)
+
+Public API
+----------
+load_portfolio(file_bytes) -> dict
+    summary      : DataFrame – company, total_bought, total_sold, net_invested,
+                               dividends, buy_trades, last_purchase
+    transactions : DataFrame – date, Transaction Type, Company/Fund, Amount (¥),
+                               Type (EN), Account Type, Amount (Shares),
+                               + aliases: type_en, company, amount
+    dividends    : DataFrame – company, received
+    loaded_at    : datetime
+    row_counts   : dict {raw, valid, skipped}
+    errors       : list[str]  — non-fatal warnings; does not include fatal errors
+    is_valid     : bool
+
+make_demo() -> (summary_df, transactions_df, dividends_df)
+    Realistic sample data when no file is uploaded.
 """
+from __future__ import annotations
+
+from datetime import datetime
 from io import BytesIO
+from typing import Any
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 
+REQUIRED_COLUMNS = [
+    "Date", "Security", "Description", "Account Type",
+    "Order Amount", "Price", "FX Rate", "Amount (Shares)",
+]
 
-# ── Column-name resolvers (internal_key → list of acceptable Excel headers) ──
-PS_MAP = {   # Portfolio Summary sheet
-    "company":       ["Company / Fund Name", "Company name", "Company Name", "Company", "銘柄名", "銘柄"],
-    "total_bought":  ["Total Bought (¥)", "Total Bought", "買付合計", "購入合計"],
-    "total_sold":    ["Total Sold (¥)",   "Total Sold",   "売却合計"],
-    "net_invested":  ["Net Invested (¥)", "Net Invested", "純投資額"],
-    "dividends":     ["Dividends / Dist. (¥)", "Dividends (¥)", "Dividends", "配当金"],
-    "buy_trades":    ["Buy Trades",       "買付回数"],
-    "last_purchase": ["Last Purchase",    "最終購入日"],
-}
-TH_MAP = {   # Transaction History sheet
-    "date":    ["Date", "日付", "取引日"],
-    "tx_type": ["Transaction Type", "Type", "取引種別"],
-    "company": ["Company / Fund", "Company/Fund", "Company", "Company Name", "銘柄名"],
-    "amount":  ["Amount (¥)", "Amount", "金額"],
-    "type_en": ["Type (EN)", "Type EN", "Type_EN"],
-}
-DT_MAP = {   # Dividend Tracker sheet
-    "company":  ["Company / Fund", "Company/Fund", "Company", "Company Name", "銘柄名"],
-    "received": ["Total Received (¥)", "Total Received", "配当合計"],
+TYPE_MAP: dict[str, str] = {
+    # Japanese transaction descriptions → English canonical type
+    "買付":         "Buy",
+    "積立買付":     "Buy",
+    "売却":         "Sell",
+    "売却（特定）": "Sell",
+    "配当金入金":   "Dividend",
+    # English passthroughs (future-proof for exports that already have English)
+    "buy":          "Buy",
+    "sell":         "Sell",
+    "dividend":     "Dividend",
 }
 
 
-def remap(df: pd.DataFrame, col_map: dict) -> pd.DataFrame:
-    """Rename df columns using the first matching alias from col_map."""
-    rename = {}
-    for internal_key, aliases in col_map.items():
-        for alias in aliases:
-            if alias in df.columns:
-                rename[alias] = internal_key
-                break
-    return df.rename(columns=rename)
+def _normalize_type(val: Any) -> str:
+    if pd.isna(val):
+        return "Other"
+    s = str(val).strip()
+    return TYPE_MAP.get(s, TYPE_MAP.get(s.lower(), s))
 
 
 @st.cache_data(show_spinner=False)
-def load_excel(file_bytes: bytes):
-    """Read the uploaded Excel file and return (ps, th, dt) DataFrames."""
-    xls = pd.ExcelFile(BytesIO(file_bytes))
+def load_portfolio(file_bytes: bytes) -> dict:
+    """Parse the single-sheet flat transaction log and return the standard dict."""
+    errors: list[str] = []
 
-    # Portfolio Summary — row 4 (0-indexed: 3) is the header; rows 1-3 are title/subtitle/blank
-    ps = remap(pd.read_excel(xls, sheet_name="Portfolio Summary", header=3), PS_MAP)
-    for col in ["total_bought", "total_sold", "net_invested", "dividends", "buy_trades"]:
-        if col in ps.columns:
-            ps[col] = pd.to_numeric(ps[col], errors="coerce").fillna(0)
-    ps = ps.dropna(subset=["company"]).reset_index(drop=True)
-    # drop section-label and total rows (numeric columns are 0 for them after coercion)
-    ps = ps[ps["company"].str.match(r"^(?!▶|TOTAL)", na=False)].reset_index(drop=True)
+    try:
+        raw = pd.read_excel(BytesIO(file_bytes), sheet_name=0, header=0)
+    except Exception as exc:
+        return _invalid(f"Could not read Excel file: {exc}")
 
-    # Transaction History — row 2 (0-indexed: 1) is the header; row 1 is the title
-    th = remap(pd.read_excel(xls, sheet_name="Transaction History", header=1), TH_MAP)
-    if "amount" in th.columns:
-        th["amount"] = pd.to_numeric(th["amount"], errors="coerce").fillna(0)
-    if "date" in th.columns:
-        th["date"] = pd.to_datetime(th["date"], errors="coerce")
-    if "type_en" not in th.columns and "tx_type" in th.columns:
-        th["type_en"] = th["tx_type"]
-    th = th.dropna(subset=["date"]).reset_index(drop=True)
+    # ── Column validation ────────────────────────────────────────────────────
+    missing = [c for c in REQUIRED_COLUMNS if c not in raw.columns]
+    if missing:
+        return _invalid(f"Missing required columns: {missing!r}")
 
-    # Dividend Tracker — row 2 (0-indexed: 1) is the header; row 1 is the title
-    dt = remap(pd.read_excel(xls, sheet_name="Dividend Tracker", header=1), DT_MAP)
-    if "received" in dt.columns:
-        dt["received"] = pd.to_numeric(dt["received"], errors="coerce").fillna(0)
-    dt = (
-        dt.dropna(subset=["company"])
+    df = raw[REQUIRED_COLUMNS].copy()
+
+    # ── Date parsing ─────────────────────────────────────────────────────────
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    nat_rows = df["Date"].isna().sum()
+    if nat_rows:
+        errors.append(f"{nat_rows} row(s) had unparseable dates and were dropped.")
+    df = df.dropna(subset=["Date"]).reset_index(drop=True)
+    raw_count = len(df)
+
+    # ── Numeric coercion ─────────────────────────────────────────────────────
+    for col in ["Order Amount", "Price", "FX Rate", "Amount (Shares)"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # ── Cross-check: Price × Shares × FX Rate ≈ Order Amount (1% tolerance) ─
+    check = (
+        df["Price"].notna() & (df["Price"] != 0) &
+        df["FX Rate"].notna() & (df["FX Rate"] != 0) &
+        df["Amount (Shares)"].notna() & (df["Amount (Shares)"] != 0) &
+        df["Order Amount"].notna() & (df["Order Amount"] != 0)
+    )
+    for idx in df[check].index:
+        row = df.loc[idx]
+        computed = row["Price"] * row["Amount (Shares)"] * row["FX Rate"]
+        actual = row["Order Amount"]
+        if abs(computed - actual) / abs(actual) > 0.01:
+            errors.append(
+                f"Cross-check mismatch {row['Date'].date()} / {row['Security']}: "
+                f"Price×Shares×FX={computed:,.0f} vs Order Amount={actual:,.0f}"
+            )
+
+    # ── Normalize Description → canonical English type ────────────────────────
+    df["type_en"] = df["Description"].apply(_normalize_type)
+    company = df["Security"].str.strip()
+
+    # ── transactions DataFrame ───────────────────────────────────────────────
+    transactions = pd.DataFrame({
+        "date":               df["Date"],
+        "Transaction Type":   df["Description"],
+        "Company/Fund":       company,
+        "Amount (¥)":         df["Order Amount"].fillna(0),
+        "Type (EN)":          df["type_en"],
+        "Account Type":       df["Account Type"],
+        "Amount (Shares)":    df["Amount (Shares)"],
+    })
+    # Aliases used by the analytics layer
+    transactions["type_en"] = transactions["Type (EN)"]
+    transactions["company"]  = transactions["Company/Fund"]
+    transactions["amount"]   = transactions["Amount (¥)"]
+
+    # ── summary DataFrame (one row per Security) ──────────────────────────────
+    buy_tx  = transactions[transactions["type_en"] == "Buy"]
+    sell_tx = transactions[transactions["type_en"] == "Sell"]
+    div_tx  = transactions[transactions["type_en"] == "Dividend"]
+
+    all_companies = company.unique()
+    summary = (
+        pd.DataFrame({"company": all_companies})
+        .merge(buy_tx.groupby("company")["amount"].sum().rename("total_bought"),
+               on="company", how="left")
+        .merge(sell_tx.groupby("company")["amount"].sum().rename("total_sold"),
+               on="company", how="left")
+        .merge(div_tx.groupby("company")["amount"].sum().rename("dividends"),
+               on="company", how="left")
+        .merge(buy_tx.groupby("company").size().rename("buy_trades"),
+               on="company", how="left")
+        .merge(buy_tx.groupby("company")["date"].max().rename("last_purchase"),
+               on="company", how="left")
+    )
+    for col in ["total_bought", "total_sold", "dividends"]:
+        summary[col] = summary[col].fillna(0.0)
+    summary["buy_trades"]   = summary["buy_trades"].fillna(0).astype(int)
+    summary["net_invested"] = summary["total_bought"] - summary["total_sold"]
+    summary["last_purchase"] = (
+        pd.to_datetime(summary["last_purchase"]).dt.strftime("%Y.%m.%d")
+    )
+    summary = summary[[
+        "company", "total_bought", "total_sold", "net_invested",
+        "dividends", "buy_trades", "last_purchase",
+    ]]
+
+    # ── dividends DataFrame (one row per company) ─────────────────────────────
+    dividends = (
+        div_tx.groupby("company")["amount"]
+        .sum()
+        .reset_index()
+        .rename(columns={"amount": "received"})
         .sort_values("received", ascending=False)
         .reset_index(drop=True)
     )
 
-    return ps, th, dt
+    return {
+        "summary":      summary,
+        "transactions": transactions,
+        "dividends":    dividends,
+        "loaded_at":    datetime.now(),
+        "row_counts":   {"raw": raw_count, "valid": len(transactions), "skipped": int(nat_rows)},
+        "errors":       errors,
+        "is_valid":     True,
+    }
+
+
+def _invalid(msg: str) -> dict:
+    return {
+        "summary":      pd.DataFrame(),
+        "transactions": pd.DataFrame(),
+        "dividends":    pd.DataFrame(),
+        "loaded_at":    datetime.now(),
+        "row_counts":   {"raw": 0, "valid": 0, "skipped": 0},
+        "errors":       [msg],
+        "is_valid":     False,
+    }
 
 
 # ── Demo-data companies — Yahoo Finance tickers (Tokyo Stock Exchange) ──
@@ -102,8 +206,8 @@ DEMO_COMPANIES_TICKERS = {
 }
 
 
-def make_demo():
-    """Return realistic sample DataFrames so the dashboard isn't empty."""
+def make_demo() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Return realistic sample (summary, transactions, dividends) DataFrames."""
     rng = np.random.default_rng(42)
 
     companies = list(DEMO_COMPANIES_TICKERS.keys())
@@ -114,11 +218,15 @@ def make_demo():
     net       = bought - sold
     divs      = np.round(net * rng.uniform(0.005, 0.03, size=n), 0)
     trades    = rng.integers(1, 18, size=n).astype(float)
-    dates     = pd.date_range("2024-01-01", periods=n, freq="ME").strftime("%Y-%m-%d")
+    dates     = pd.date_range("2024-01-01", periods=n, freq="ME").strftime("%Y.%m.%d")
 
-    ps = pd.DataFrame({
-        "company": companies, "total_bought": bought, "total_sold": sold,
-        "net_invested": net, "dividends": divs, "buy_trades": trades,
+    summary = pd.DataFrame({
+        "company":       companies,
+        "total_bought":  bought,
+        "total_sold":    sold,
+        "net_invested":  net,
+        "dividends":     divs,
+        "buy_trades":    trades,
         "last_purchase": dates,
     })
 
@@ -128,22 +236,33 @@ def make_demo():
         amounts = np.round(b / k * rng.uniform(0.8, 1.2, size=k), 0)
         for a in amounts:
             day = pd.Timestamp("2024-01-01") + pd.Timedelta(days=int(rng.integers(0, 480)))
-            rows.append({"date": day, "type_en": "Buy", "company": c, "amount": a})
+            rows.append({"date": day, "type_en": "Buy", "company": c, "amount": a,
+                         "Type (EN)": "Buy", "Company/Fund": c, "Amount (¥)": a,
+                         "Transaction Type": "Buy", "Account Type": "Taxable (Tokutei)",
+                         "Amount (Shares)": None})
     for c, s in zip(companies[:5], sold[:5]):
         if s > 0:
             day = pd.Timestamp("2024-08-01") + pd.Timedelta(days=int(rng.integers(0, 120)))
-            rows.append({"date": day, "type_en": "Sell", "company": c, "amount": s})
+            rows.append({"date": day, "type_en": "Sell", "company": c, "amount": s,
+                         "Type (EN)": "Sell", "Company/Fund": c, "Amount (¥)": s,
+                         "Transaction Type": "Sell", "Account Type": "Taxable (Tokutei)",
+                         "Amount (Shares)": None})
     for c, d in zip(companies[:7], divs[:7]):
         if d > 0:
-            rows.append({"date": pd.Timestamp("2024-09-30"), "type_en": "Dividend", "company": c, "amount": d})
-    th = pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
+            rows.append({"date": pd.Timestamp("2024-09-30"), "type_en": "Dividend",
+                         "company": c, "amount": d, "Type (EN)": "Dividend",
+                         "Company/Fund": c, "Amount (¥)": d,
+                         "Transaction Type": "配当金入金", "Account Type": "Taxable (Tokutei)",
+                         "Amount (Shares)": None})
 
-    dt = (
-        ps[["company", "dividends"]]
+    transactions = pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
+
+    dividends = (
+        summary[["company", "dividends"]]
         .rename(columns={"dividends": "received"})
         .query("received > 0")
         .sort_values("received", ascending=False)
         .reset_index(drop=True)
     )
 
-    return ps, th, dt
+    return summary, transactions, dividends
